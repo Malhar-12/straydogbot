@@ -54,7 +54,7 @@ async function getMediaUrl(mediaId) {
 
 /* ── AIRTABLE ── */
 const AT_BASE  = 'appIAa5QyApMtzlR8';
-const AT_TABLE = 'tblMlEKbt0mD8FWXv';
+const AT_TABLE = 'tblLhgEATdVGkWhGo';
 const AT_URL   = `https://api.airtable.com/v0/${AT_BASE}/${AT_TABLE}`;
 const AT_HDR   = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.AIRTABLE_API_KEY}` });
 
@@ -63,15 +63,17 @@ async function atCreate(ref, data, incidentTime) {
     const res = await fetch(AT_URL, {
       method: 'POST', headers: AT_HDR(),
       body: JSON.stringify({ fields: {
-        fldhXsOBPVr9cU3Ag: ref,
-        fldQQfiLwONajehi3: data.incidentLabel || '',
-        fldiQKewmVP94vd9b: data.name || '',
-        fldKoc6nVRgfykSdv: data.phone || '',
-        fldQ7EDVzXAWLfkiW: data.location || '',
-        fldP4q0jO7PkNwn1q: data.altContact || '',
-        fldsPeUvD4IjDhqKb: data.mediaUrl || '',
-        fld3Sp2Fm5igA1nJN: 'Open',
-        fldGPTBZLf56bLq7d: incidentTime || '',
+        fldi3QMTASyf3FiH8: ref,                         // Ref
+        fldgb6Ftq7qaRNoHe: 'Open',                      // Status
+        fldQmRhTECXhx75EX: data.lang === 'mr' ? 'मराठी' : 'English', // Language
+        fldNfZJ9MB5Ub7o0S: data.incidentLabel || '',    // Incident Type
+        fld8dumoEH3eCv8bg: data.name || '',             // Complainant Name
+        fld9mitPsPU8y32PW: data.phone || '',            // Reporter Phone
+        fldE45zv9IER93A8Q: data.location || '',         // Location
+        fldhrqYI58ioDB6xH: data.altContact || '',       // Alt Contact
+        fld5idjsIpkMglZMV: data.mediaType || '',        // Media Type
+        flddMQC528gDuo0AI: data.mediaUrl || '',         // Media URL
+        fld1VlQL5WwOptowZ: new Date().toISOString().split('T')[0], // Submitted At
       }}),
     });
     const json = await res.json();
@@ -85,10 +87,11 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
     await fetch(`${AT_URL}/${recordId}`, {
       method: 'PATCH', headers: AT_HDR(),
       body: JSON.stringify({ fields: {
-        fld3Sp2Fm5igA1nJN: 'Closed',
-        fldYTCvu9DMb1XyTj: closingLocation || '',
-        fld90MrPHsvnAvqtB: driverName || '',
-        fldsPeUvD4IjDhqKb: closingMediaUrl || '',
+        fldgb6Ftq7qaRNoHe: 'Closed',                  // Status
+        fldQlVSiP3pltNJi1: driverName || '',           // Closed By
+        fldlpGNuIN7BjnOHS: closingLocation || '',      // Closing Location
+        fld5LrgHULuF3hWxp: closingMediaUrl || '',      // Closing Media URL
+        fldsiGzl0zRrlDGsd: new Date().toISOString().split('T')[0], // Closed At
       }}),
     });
   } catch (e) { console.error('[atClose exception]', e.message); }
