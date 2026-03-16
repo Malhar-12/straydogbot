@@ -437,5 +437,5 @@ require('http').createServer(async (req, res) => {
     });
     return;
   }
-  res.writeHead(405); res.end('Method Not Allowed');
+  res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'}); res.end('VVCMC Stray Dog Bot is running! OK');
 }).listen(PORT, () => console.log(`✅ VVCMC Bot running on port ${PORT}`));
