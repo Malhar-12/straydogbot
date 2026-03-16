@@ -157,7 +157,7 @@ ${DRIVERS.map(d => `${d.id}. ${d.name}  +${d.phone}`).join('\n')}`);
 📍 *ठिकाण:* ${ticket.data.location}
 📞 *संपर्क:* +${ticket.data.phone}
 📞 *Alt:* ${ticket.data.altContact || 'N/A'}
-🕐 *घटनेची वेळ:* ${ticket.data.incidentTime}
+🕐 *वेळ:* ${ticket.data.incidentTime}
 📅 *भेटीची वेळ:* ${date} at ${time}
 
 _काम झाल्यावर *ticket* टाइप करा._`);
@@ -200,7 +200,7 @@ async function handleDriver(from, msgObj, driver) {
 👤 ${selected.data.name}
 📍 ${selected.data.location}
 🐕 ${selected.data.incidentLabel}
-🕐 घटनेची वेळ: ${selected.data.incidentTime}
+🕐 वेळ: ${selected.data.incidentTime}
 
 Case बंद करण्यासाठी:
 1️⃣ *location* पाठवा (WhatsApp pin / Google Maps)
@@ -322,7 +322,7 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     if (text.length < 2) { await sendWA(from, `⚠️ पूर्ण नाव टाका.`); return; }
     s.data.name = text; s.data.phone = from; s.step = 'location';
     await sendWA(from, s.lang === 'mr'
-      ? `धन्यवाद ${text}! 🙏\n\n📍 घटना *कुठे घडली*?\n• पत्ता टाइप करा\n• Google Maps link पाठवा\n• WhatsApp 📎 Location Pin पाठवा`
+      ? `धन्यवाद ${text}! 🙏\n\n📍 *ठिकाण* सांगा:\n• पत्ता टाइप करा\n• Google Maps link पाठवा\n• WhatsApp 📎 Location Pin पाठवा`
       : `Thank you ${text}! 🙏\n\n📍 *Where did the incident happen?*\n• Type the address / landmark\n• Paste a Google Maps link\n• Drop a 📎 Location Pin`);
     return;
   }
@@ -353,7 +353,7 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     }
     s.step = 'photo';
     await sendWA(from, s.lang === 'mr'
-      ? `📸 घटनेचा *फोटो किंवा व्हिडिओ* पाठवा.\n⚠️ *हे अनिवार्य आहे — फोटोशिवाय तक्रार नोंदवली जाणार नाही.*`
+      ? `📸 परिसराचा *फोटो किंवा व्हिडिओ* पाठवा.\n⚠️ *हे अनिवार्य आहे — फोटोशिवाय तक्रार नोंदवली जाणार नाही.*`
       : `📸 Send a *photo or video* of the incident.\n⚠️ *This is mandatory — complaint cannot be registered without it.*`);
     return;
   }
@@ -389,17 +389,8 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     await sendWA(GS_NUMBER, adminAlert);
     if (mId) await forwardMedia(GS_NUMBER, mId, mType, s.lang === 'mr' ? `📸 पुरावा — ${ref}` : `📸 Evidence — ${ref}`);
 
-    // Heads-up to all drivers
-    for (const drv of DRIVERS) {
-      await sendWA(drv.phone,
-`📢 *नवीन तक्रार आली आहे*
-🎫 ${ref}
-🐕 ${s.data.incidentLabel}
-📍 ${s.data.location}
-👤 ${s.data.name}
-🕐 ${s.data.incidentTime}
-_Malhar sir लवकरच assign करतील._`);
-    }
+
+    // Driver will be notified only when GS assigns them specifically
     return;
   }
 
