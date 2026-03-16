@@ -1,7 +1,6 @@
 'use strict';
 
-/* ── CONFIG ── */
-const GS_NUMBER = '919028331108';  // Malhar Kshirsagar — General Secretary
+const GS_NUMBER = '919028331108';
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
@@ -9,6 +8,7 @@ const DRIVERS = [
 
 const sessions = {};
 const tickets  = {};
+const pendingAssign = {}; // stores ref waiting for driver selection
 
 function getSession(from) {
   if (!sessions[from]) sessions[from] = { step: 'greet', lang: null, data: {} };
@@ -23,7 +23,6 @@ function nowIST() {
   });
 }
 
-/* ── WHATSAPP ── */
 async function sendWA(to, body) {
   if (!to || to.includes('X')) return;
   const res = await fetch(`https://graph.facebook.com/v19.0/${process.env.WA_PHONE_NUMBER_ID}/messages`, {
@@ -52,28 +51,27 @@ async function getMediaUrl(mediaId) {
   } catch { return ''; }
 }
 
-/* ── AIRTABLE ── */
 const AT_BASE  = 'appIAa5QyApMtzlR8';
 const AT_TABLE = 'tblLhgEATdVGkWhGo';
 const AT_URL   = `https://api.airtable.com/v0/${AT_BASE}/${AT_TABLE}`;
 const AT_HDR   = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.AIRTABLE_API_KEY}` });
 
-async function atCreate(ref, data, incidentTime) {
+async function atCreate(ref, data) {
   try {
     const res = await fetch(AT_URL, {
       method: 'POST', headers: AT_HDR(),
       body: JSON.stringify({ fields: {
-        fldi3QMTASyf3FiH8: ref,                         // Ref
-        fldgb6Ftq7qaRNoHe: 'Open',                      // Status
-        fldQmRhTECXhx75EX: data.lang === 'mr' ? 'मराठी' : 'English', // Language
-        fldNfZJ9MB5Ub7o0S: data.incidentLabel || '',    // Incident Type
-        fld8dumoEH3eCv8bg: data.name || '',             // Complainant Name
-        fld9mitPsPU8y32PW: data.phone || '',            // Reporter Phone
-        fldE45zv9IER93A8Q: data.location || '',         // Location
-        fldhrqYI58ioDB6xH: data.altContact || '',       // Alt Contact
-        fld5idjsIpkMglZMV: data.mediaType || '',        // Media Type
-        flddMQC528gDuo0AI: data.mediaUrl || '',         // Media URL
-        fld1VlQL5WwOptowZ: new Date().toISOString().split('T')[0], // Submitted At
+        fldi3QMTASyf3FiH8: ref,
+        fldgb6Ftq7qaRNoHe: 'Open',
+        fldQmRhTECXhx75EX: data.lang === 'mr' ? 'मराठी' : 'English',
+        fldNfZJ9MB5Ub7o0S: data.incidentLabel || '',
+        fld8dumoEH3eCv8bg: data.name || '',
+        fld9mitPsPU8y32PW: data.phone || '',
+        fldE45zv9IER93A8Q: data.location || '',
+        fldhrqYI58ioDB6xH: data.altContact || '',
+        fld5idjsIpkMglZMV: data.mediaType || '',
+        flddMQC528gDuo0AI: data.mediaUrl || '',
+        fld1VlQL5WwOptowZ: new Date().toISOString().split('T')[0],
       }}),
     });
     const json = await res.json();
@@ -87,11 +85,11 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
     await fetch(`${AT_URL}/${recordId}`, {
       method: 'PATCH', headers: AT_HDR(),
       body: JSON.stringify({ fields: {
-        fldgb6Ftq7qaRNoHe: 'Closed',                  // Status
-        fldQlVSiP3pltNJi1: driverName || '',           // Closed By
-        fldlpGNuIN7BjnOHS: closingLocation || '',      // Closing Location
-        fld5LrgHULuF3hWxp: closingMediaUrl || '',      // Closing Media URL
-        fldsiGzl0zRrlDGsd: new Date().toISOString().split('T')[0], // Closed At
+        fldgb6Ftq7qaRNoHe: 'Closed',
+        fldQlVSiP3pltNJi1: driverName || '',
+        fldlpGNuIN7BjnOHS: closingLocation || '',
+        fld5LrgHULuF3hWxp: closingMediaUrl || '',
+        fldsiGzl0zRrlDGsd: new Date().toISOString().split('T')[0],
       }}),
     });
   } catch (e) { console.error('[atClose exception]', e.message); }
@@ -122,34 +120,26 @@ function parseLocation(text) {
   return null;
 }
 
-/* ── ADMIN HANDLER (Malhar — assigns drivers, gets all alerts) ── */
+/* ── GS / ADMIN HANDLER ── */
 async function handleAdmin(from, text) {
-  const m = text.match(/ASSIGN\s+(SDB-[A-Z0-9]+)\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
-  if (!m) {
-    await sendWA(from,
-`📋 *Admin Commands — VVCMC Bot*
 
-Driver assign करण्यासाठी:
-ASSIGN SDB-XXX DRIVER:1 DATE:15-Mar TIME:10:00AM
+  // STEP 2 — Admin selected a driver number (1 or 2)
+  if (pendingAssign[from] && /^[12]$/.test(text)) {
+    const { ref, date, time } = pendingAssign[from];
+    const ticket = tickets[ref];
+    if (!ticket) { await sendWA(from, `⚠️ Ticket \`${ref}\` not found. Bot restart झाले असेल.`); delete pendingAssign[from]; return; }
+    const driver = DRIVERS.find(d => d.id === parseInt(text));
+    if (!driver) { await sendWA(from, `⚠️ Driver ${text} not found.`); return; }
 
-*Drivers / कर्मचारी:*
-${DRIVERS.map(d => `${d.id}. ${d.name}  +${d.phone}`).join('\n')}`);
-    return;
-  }
+    delete pendingAssign[from]; // clear pending
 
-  const [, ref, driverId, date, time] = m;
-  const ticket = tickets[ref];
-  if (!ticket) { await sendWA(from, `⚠️ Ticket \`${ref}\` not found. Bot restart झाले असेल.`); return; }
-  const driver = DRIVERS.find(d => d.id === parseInt(driverId));
-  if (!driver) { await sendWA(from, `⚠️ Driver ${driverId} not found.`); return; }
+    ticket.status = 'Assigned';
+    ticket.driverName = driver.name;
+    ticket.visitDate = date;
+    ticket.visitTime = time;
 
-  ticket.status = 'Assigned';
-  ticket.driverName = driver.name;
-  ticket.visitDate = date;
-  ticket.visitTime = time;
-
-  // Notify driver
-  await sendWA(driver.phone,
+    // Notify ONLY the selected driver
+    await sendWA(driver.phone,
 `📋 *तुम्हाला काम सोपवले गेले आहे!*
 🎫 Ref: ${ref}
 🐕 *तक्रार:* ${ticket.data.incidentLabel}
@@ -162,13 +152,89 @@ ${DRIVERS.map(d => `${d.id}. ${d.name}  +${d.phone}`).join('\n')}`);
 
 _काम झाल्यावर *ticket* टाइप करा._`);
 
-  // Notify citizen in their language
-  const citizenMsg = ticket.lang === 'mr'
-    ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*\n🎫 Ticket: ${ref}\n\n👤 *अधिकारी:* ${driver.name}\n📅 *भेटीची तारीख:* ${date}\n⏰ *वेळ:* ${time}\n\n_ते येण्यापूर्वी फोन करतील._`
-    : `👷 *Your complaint has been assigned to an officer!*\n🎫 Ticket: ${ref}\n\n👤 *Officer:* ${driver.name}\n📅 *Visit Date:* ${date}\n⏰ *Time:* ${time}\n\n_He will call before arriving._`;
-  await sendWA(ticket.citizenPhone, citizenMsg);
+    // Notify citizen in their language
+    const citizenMsg = ticket.lang === 'mr'
+      ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*\n🎫 Ticket: ${ref}\n\n👤 *अधिकारी:* ${driver.name}\n📅 *भेटीची तारीख:* ${date}\n⏰ *वेळ:* ${time}\n\n_ते येण्यापूर्वी फोन करतील._`
+      : `👷 *Your complaint has been assigned to an officer!*\n🎫 Ticket: ${ref}\n\n👤 *Officer:* ${driver.name}\n📅 *Visit Date:* ${date}\n⏰ *Time:* ${time}\n\n_He will call before arriving._`;
+    await sendWA(ticket.citizenPhone, citizenMsg);
 
-  await sendWA(from, `✅ ${ref} → *${driver.name}*\nVisit: ${date} at ${time}\nCitizen ✓  Driver ✓`);
+    await sendWA(from, `✅ *${ref}* → *${driver.name}*\n📅 ${date} ⏰ ${time}\nCitizen ✓  Driver ✓`);
+    return;
+  }
+
+  // STEP 1 — Admin sends ASSIGN command
+  const m = text.match(/ASSIGN\s+(SDB-[A-Z0-9]+)\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
+  if (m) {
+    const [, ref, driverId, date, time] = m;
+    const ticket = tickets[ref];
+    if (!ticket) { await sendWA(from, `⚠️ Ticket \`${ref}\` not found.`); return; }
+    const driver = DRIVERS.find(d => d.id === parseInt(driverId));
+    if (!driver) { await sendWA(from, `⚠️ Driver ${driverId} not found.`); return; }
+
+    // Direct assign — no selection needed
+    delete pendingAssign[from];
+    ticket.status = 'Assigned';
+    ticket.driverName = driver.name;
+    ticket.visitDate = date;
+    ticket.visitTime = time;
+
+    await sendWA(driver.phone,
+`📋 *तुम्हाला काम सोपवले गेले आहे!*
+🎫 Ref: ${ref}
+🐕 *तक्रार:* ${ticket.data.incidentLabel}
+👤 *तक्रारदार:* ${ticket.data.name}
+📍 *ठिकाण:* ${ticket.data.location}
+📞 *संपर्क:* +${ticket.data.phone}
+🕐 *वेळ:* ${ticket.data.incidentTime}
+📅 *भेटीची वेळ:* ${date} at ${time}
+
+_काम झाल्यावर *ticket* टाइप करा._`);
+
+    const citizenMsg = ticket.lang === 'mr'
+      ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*\n🎫 ${ref}\n👤 *अधिकारी:* ${driver.name}\n📅 ${date} ⏰ ${time}`
+      : `👷 *Your complaint has been assigned!*\n🎫 ${ref}\n👤 *Officer:* ${driver.name}\n📅 ${date} ⏰ ${time}`;
+    await sendWA(ticket.citizenPhone, citizenMsg);
+    await sendWA(from, `✅ *${ref}* → *${driver.name}*\n📅 ${date} ⏰ ${time}\nCitizen ✓  Driver ✓`);
+    return;
+  }
+
+  // STEP 1B — Admin sends just ticket ref to start selection
+  const refOnly = text.match(/^(SDB-[A-Z0-9]+)$/i);
+  if (refOnly) {
+    const ref = refOnly[1].toUpperCase();
+    const ticket = tickets[ref];
+    if (!ticket) { await sendWA(from, `⚠️ Ticket \`${ref}\` not found.`); return; }
+    pendingAssign[from] = { ref, date: 'TBD', time: 'TBD' };
+    await sendWA(from,
+`📋 *Ticket:* ${ref}
+🐕 ${ticket.data.incidentLabel}
+👤 ${ticket.data.name}
+📍 ${ticket.data.location}
+
+*Driver निवडा / Select driver:*
+1️⃣  Somnath Catcher
+2️⃣  Mukesh Catcher
+
+_Reply with 1 or 2_`);
+    return;
+  }
+
+  // Default — show help with open tickets list
+  const openTickets = Object.values(tickets).filter(t => t.status === 'Open');
+  let msg = `📋 *Admin Panel — VVCMC Bot*\n\n`;
+
+  if (openTickets.length > 0) {
+    msg += `*Open Tickets:*\n━━━━━━━━━━\n`;
+    openTickets.forEach((t, i) => {
+      msg += `${i+1}. *${t.ref}*\n   🐕 ${t.data.incidentLabel}\n   👤 ${t.data.name}\n   📍 ${t.data.location.slice(0,40)}\n   🕐 ${t.data.incidentTime}\n\n`;
+    });
+    msg += `_Ticket ref पाठवा to assign (e.g. ${openTickets[0].ref})_\n\n`;
+  } else {
+    msg += `✅ No open tickets right now!\n\n`;
+  }
+
+  msg += `*Manual assign:*\nASSIGN SDB-XXX DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`;
+  await sendWA(from, msg);
 }
 
 /* ── DRIVER HANDLER ── */
@@ -200,7 +266,7 @@ async function handleDriver(from, msgObj, driver) {
 👤 ${selected.data.name}
 📍 ${selected.data.location}
 🐕 ${selected.data.incidentLabel}
-🕐 वेळ: ${selected.data.incidentTime}
+🕐 ${selected.data.incidentTime}
 
 Case बंद करण्यासाठी:
 1️⃣ *location* पाठवा (WhatsApp pin / Google Maps)
@@ -233,31 +299,30 @@ Case बंद करण्यासाठी:
     if (ticket.atRecordId) await atClose(ticket.atRecordId, loc, driver.name, mUrl);
     ticket.status = 'Closed';
 
-    // Citizen — language aware closing message
+    // Citizen closing message — language aware
     const citizenClose = ticket.lang === 'mr'
-      ? `✅ *तुमची तक्रार सोडवली गेली आहे!*\n\n🎫 Ticket: ${ref}\n🐕 तक्रार: ${ticket.data.incidentLabel}\n👷 *अधिकारी:* ${driver.name}\n📍 *ठिकाण:* ${loc}\n🕐 *बंद केलेली वेळ:* ${closedAt}\n\nआमच्या टीमने तुमच्या परिसरातील समस्या सोडवली आहे.\n_VVCMC सेवेत विश्वास ठेवल्याबद्दल धन्यवाद! 🙏_\n\nनवीन तक्रारीसाठी *Hi* पाठवा.`
-      : `✅ *Your complaint has been resolved!*\n\n🎫 Ticket: ${ref}\n🐕 Issue: ${ticket.data.incidentLabel}\n👷 *Officer:* ${driver.name}\n📍 *Resolved at:* ${loc}\n🕐 *Closed at:* ${closedAt}\n\nOur team has addressed the problem in your area.\n_Thank you for reporting to VVCMC! 🙏_\n\nSend *Hi* to file a new complaint.`;
+      ? `✅ *तुमची तक्रार सोडवली गेली आहे!*\n\n🎫 Ticket: ${ref}\n🐕 ${ticket.data.incidentLabel}\n👷 *अधिकारी:* ${driver.name}\n📍 *ठिकाण:* ${loc}\n🕐 *बंद:* ${closedAt}\n\nआमच्या टीमने समस्या सोडवली.\n_VVCMC सेवेत विश्वास ठेवल्याबद्दल धन्यवाद! 🙏_\n\nनवीन तक्रारीसाठी *Hi* पाठवा.`
+      : `✅ *Your complaint has been resolved!*\n\n🎫 Ticket: ${ref}\n🐕 ${ticket.data.incidentLabel}\n👷 *Officer:* ${driver.name}\n📍 *Resolved at:* ${loc}\n🕐 *Closed at:* ${closedAt}\n\nOur team has addressed the problem.\n_Thank you for reporting to VVCMC! 🙏_\n\nSend *Hi* to file a new complaint.`;
 
     await sendWA(ticket.citizenPhone, citizenClose);
     if (mId) await forwardMedia(ticket.citizenPhone, mId, mType,
       ticket.lang === 'mr' ? '📸 काम पूर्ण झाल्याचा पुरावा' : '📸 Proof of work completed');
 
-    // Admin closing alert
+    // GS closing alert
     await sendWA(GS_NUMBER,
 `✅ *Case Closed — VVCMC Bot*
 🎫 ${ref}
 🐕 ${ticket.data.incidentLabel}
 👷 Closed by: ${driver.name}
-📍 Location: ${loc}
-🕐 Closed at: ${closedAt}
+📍 ${loc}
+🕐 ${closedAt}
 👤 ${ticket.data.name} (+${ticket.data.phone})`);
     if (mId) await forwardMedia(GS_NUMBER, mId, mType, `Closing proof — ${ref}`);
 
     // Driver confirmation
     await sendWA(from,
-`✅ *Case यशस्वीरित्या बंद केले!*
+`✅ *Case बंद केले!*
 🎫 ${ref}
-
 ✓ तक्रारदाराला कळवले
 ✓ Photo sent to citizen
 ✓ Malhar sir ला कळवले
@@ -372,25 +437,20 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     const ref = genRef();
     const t   = { ref, status: 'Open', lang: s.lang, citizenPhone: from, data: { ...s.data }, atRecordId: null };
     tickets[ref] = t;
-    const atId = await atCreate(ref, s.data, s.data.incidentTime);
+    const atId = await atCreate(ref, s.data);
     if (atId) t.atRecordId = atId;
     s.step = 'done'; s.ref = ref;
 
-    // Confirm to citizen
     await sendWA(from, s.lang === 'mr'
-      ? `✅ *तुमची तक्रार यशस्वीरित्या नोंदवली गेली!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *तक्रार:* ${s.data.incidentLabel}\n📍 *ठिकाण:* ${s.data.location}\n🕐 *वेळ:* ${s.data.incidentTime}\n\nआमचा अधिकारी लवकरच संपर्क करेल.\n*धन्यवाद! VVCMC 🙏*`
-      : `✅ *Your complaint has been registered successfully!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *Issue:* ${s.data.incidentLabel}\n📍 *Location:* ${s.data.location}\n🕐 *Time:* ${s.data.incidentTime}\n\nOur officer will contact you shortly.\n*Thank you! VVCMC 🙏*`);
+      ? `✅ *तुमची तक्रार नोंदवली गेली!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *तक्रार:* ${s.data.incidentLabel}\n📍 *ठिकाण:* ${s.data.location}\n🕐 *वेळ:* ${s.data.incidentTime}\n\nआमचा अधिकारी लवकरच संपर्क करेल.\n*धन्यवाद! VVCMC 🙏*`
+      : `✅ *Your complaint has been registered!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *Issue:* ${s.data.incidentLabel}\n📍 *Location:* ${s.data.location}\n🕐 *Time:* ${s.data.incidentTime}\n\nOur officer will contact you shortly.\n*Thank you! VVCMC 🙏*`);
 
-    // Alert Admin — language matches citizen
     const adminAlert = s.lang === 'mr'
-      ? `🚨 *नवीन तक्रार — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *तक्रार:* ${s.data.incidentLabel}\n👤 *नाव:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *ठिकाण:* ${s.data.location}\n📞 *Alt:* ${s.data.altContact || 'N/A'}\n🕐 *वेळ:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Driver assign करा:_\nASSIGN ${ref} DRIVER:1 DATE:15-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}`).join('\n')}`
-      : `🚨 *New Complaint — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *Issue:* ${s.data.incidentLabel}\n👤 *Name:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *Location:* ${s.data.location}\n📞 *Alt Contact:* ${s.data.altContact || 'N/A'}\n🕐 *Time:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Assign a driver:_\nASSIGN ${ref} DRIVER:1 DATE:15-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}`).join('\n')}`;
+      ? `🚨 *नवीन तक्रार — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *तक्रार:* ${s.data.incidentLabel}\n👤 *नाव:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *ठिकाण:* ${s.data.location}\n📞 *Alt:* ${s.data.altContact || 'N/A'}\n🕐 *वेळ:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref to assign:_\n*${ref}*`
+      : `🚨 *New Complaint — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *Issue:* ${s.data.incidentLabel}\n👤 *Name:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *Location:* ${s.data.location}\n📞 *Alt Contact:* ${s.data.altContact || 'N/A'}\n🕐 *Time:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref to assign:_\n*${ref}*`;
 
     await sendWA(GS_NUMBER, adminAlert);
     if (mId) await forwardMedia(GS_NUMBER, mId, mType, s.lang === 'mr' ? `📸 पुरावा — ${ref}` : `📸 Evidence — ${ref}`);
-
-
-    // Driver will be notified only when GS assigns them specifically
     return;
   }
 
@@ -431,8 +491,8 @@ require('http').createServer(async (req, res) => {
         const from   = msgObj.from;
         const driver = DRIVERS.find(d => d.phone === from);
         if      (from === GS_NUMBER) await handleAdmin(from, (msgObj.text?.body || '').trim());
-        else if (driver)                await handleDriver(from, msgObj, driver);
-        else                            await handleCitizen(from, msgObj);
+        else if (driver)             await handleDriver(from, msgObj, driver);
+        else                         await handleCitizen(from, msgObj);
       } catch (err) { console.error('[handler error]', err.message); }
     });
     return;
