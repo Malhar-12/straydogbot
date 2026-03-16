@@ -417,7 +417,7 @@ require('http').createServer(async (req, res) => {
     const token = url.searchParams.get('hub.verify_token');
     const challenge = url.searchParams.get('hub.challenge');
     if (mode === 'subscribe' && token === process.env.WA_VERIFY_TOKEN) { res.writeHead(200); res.end(challenge); return; }
-    res.writeHead(200); res.end('✅ VVCMC Stray Dog Bot is running! 🐕'); return;
+    res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'}); res.end('VVCMC Stray Dog Bot is running! OK'); return;
   }
   if (req.method === 'POST') {
     let body = '';
