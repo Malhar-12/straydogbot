@@ -477,6 +477,10 @@ require('http').createServer(async (req, res) => {
     const token = url.searchParams.get('hub.verify_token');
     const challenge = url.searchParams.get('hub.challenge');
     if (mode === 'subscribe' && token === process.env.WA_VERIFY_TOKEN) { res.writeHead(200); res.end(challenge); return; }
+    if (url.pathname === '/privacy') {
+      const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Privacy Policy - VVCMC Stray Dog Bot</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#333;line-height:1.6}h1{color:#1a6b3a}h2{color:#333;margin-top:30px}</style></head><body><h1>Privacy Policy</h1><p>Last updated: March 17, 2026</p><p>This Privacy Policy applies to the <strong>VVCMC Stray Dog Complaint Bot</strong> operated by Vasai Virar City Municipal Corporation (VVCMC).</p><h2>Information We Collect</h2><ul><li>Your WhatsApp phone number</li><li>Your name</li><li>Incident location</li><li>Alternate contact number (optional)</li><li>Photos or videos of the incident</li><li>Date and time of complaint</li></ul><h2>How We Use Your Information</h2><ul><li>Register and track your complaint</li><li>Assign municipal officers</li><li>Notify you about complaint status</li></ul><h2>Data Storage</h2><p>Complaint data is stored securely and retained as required by municipal regulations.</p><h2>Data Sharing</h2><p>We do not sell your data. We share only with assigned municipal officers or as required by law.</p><h2>Third Party Services</h2><p>WhatsApp Business API (Meta) and Airtable are used for messaging and data storage.</p><h2>Contact Us</h2><p>Email: vvcmc@vasaivirar.gov.in | Website: https://straydogbot.onrender.com</p><p><em>Effective: March 17, 2026</em></p></body></html>`;
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end(html); return;
+    }
     res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'}); res.end('VVCMC Stray Dog Bot is running! OK'); return;
   }
   if (req.method === 'POST') {
