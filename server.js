@@ -25,12 +25,15 @@ function nowIST() {
 
 async function sendWA(to, body) {
   if (!to || to.includes('X')) return;
+  console.log('[sendWA] to:', to);
   const res = await fetch(`https://graph.facebook.com/v19.0/${process.env.WA_PHONE_NUMBER_ID}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` },
     body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body } }),
   });
-  if (!res.ok) console.error('[sendWA error]', await res.text());
+  const txt = await res.text();
+  if (!res.ok) console.error('[sendWA ERROR] to:', to, 'status:', res.status, 'resp:', txt);
+  else console.log('[sendWA OK] to:', to, 'resp:', txt);
 }
 
 async function forwardMedia(to, mediaId, mediaType, caption) {
