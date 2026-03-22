@@ -1,6 +1,12 @@
 'use strict';
 
 const GS_NUMBER = '917219373694';
+const GS_NUMBER_ALT = '7219373694'; // fallback without country code
+
+function isAdmin(from) {
+  return from === GS_NUMBER || from === GS_NUMBER_ALT;
+}
+const isAdmin = (from) => from === GS_NUMBER || from === '7219373694' || from.endsWith('7219373694');
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
@@ -516,10 +522,11 @@ require('http').createServer(async (req, res) => {
         const msgObj = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
         if (!msgObj) return;
         const from   = msgObj.from;
+        console.log('[DEBUG] Message from:', from);
         const driver = DRIVERS.find(d => d.phone === from);
-        if      (from === GS_NUMBER) await handleAdmin(from, (msgObj.text?.body || '').trim());
-        else if (driver)             await handleDriver(from, msgObj, driver);
-        else                         await handleCitizen(from, msgObj);
+        if      (isAdmin(from))  await handleAdmin(from, (msgObj.text?.body || '').trim());
+        else if (driver)         await handleDriver(from, msgObj, driver);
+        else                     await handleCitizen(from, msgObj);
       } catch (err) { console.error('[handler error]', err.message); }
     });
     return;
