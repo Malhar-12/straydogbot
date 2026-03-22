@@ -1,10 +1,6 @@
 'use strict';
 
 const GS_NUMBER = '917219373694';
-
-function isAdmin(from) {
-  return from === '917219373694' || from === '7219373694';
-}
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
@@ -13,9 +9,6 @@ const DRIVERS = [
 const sessions = {};
 const tickets  = {};
 const pendingAssign = {}; // stores ref waiting for driver selection
-
-// Ticket counter per month
-const ticketCounters = {};
 
 function getSession(from) {
   if (!sessions[from]) sessions[from] = { step: 'greet', lang: null, data: {} };
@@ -102,9 +95,10 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
   } catch (e) { console.error('[atClose exception]', e.message); }
 }
 
+const ticketCounters = {};
 function genRef() {
   const now = new Date();
-  const mon = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short' }).toUpperCase(); // e.g. MAR
+  const mon = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short' }).toUpperCase();
   const key = `${now.getFullYear()}-${mon}`;
   if (!ticketCounters[key]) ticketCounters[key] = 0;
   ticketCounters[key]++;
@@ -178,7 +172,7 @@ _काम झाल्यावर *ticket* टाइप करा._`);
   }
 
   // STEP 1 — Admin sends ASSIGN command
-  const m = text.match(/ASSIGN\s+(VVCMC-STRAY-[A-Z0-9-]+)\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
+  const m = text.match(/ASSIGN\s+(SDB-[A-Z0-9]+)\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
   if (m) {
     const [, ref, driverId, date, time] = m;
     const ticket = tickets[ref];
@@ -214,7 +208,7 @@ _काम झाल्यावर *ticket* टाइप करा._`);
   }
 
   // STEP 1B — Admin sends just ticket ref to start selection
-  const refOnly = text.match(/^(VVCMC-STRAY-[A-Z]+-\d+)$/i);
+  const refOnly = text.match(/^(SDB-[A-Z0-9]+)$/i);
   if (refOnly) {
     const ref = refOnly[1].toUpperCase();
     const ticket = tickets[ref];
@@ -248,7 +242,7 @@ _Reply with 1 or 2_`);
     msg += `✅ No open tickets right now!\n\n`;
   }
 
-  msg += `*Manual assign:*\nASSIGN VVCMC-STRAY-MAR-00001 DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`;
+  msg += `*Manual assign:*\nASSIGN SDB-XXX DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`;
   await sendWA(from, msg);
 }
 
@@ -496,6 +490,10 @@ require('http').createServer(async (req, res) => {
       const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Data Deletion - VVCMC Stray Dog Bot</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#333;line-height:1.6}h1{color:#1a6b3a}h2{color:#333;margin-top:30px}.box{background:#f5f5f5;border-radius:8px;padding:20px;margin:20px 0}</style></head><body><h1>User Data Deletion Request</h1><p>Last updated: March 17, 2026</p><p>VVCMC Stray Dog Complaint Bot respects your privacy and your right to have your data deleted.</p><h2>What Data We Store</h2><ul><li>Your WhatsApp phone number</li><li>Your name</li><li>Complaint location</li><li>Photos/videos submitted with complaints</li><li>Date and time of complaints</li></ul><h2>How to Request Data Deletion</h2><div class="box"><p>To request deletion of your data, please contact us:</p><ul><li>Email: vvcmc@vasaivirar.gov.in</li><li>Include your WhatsApp number and request for data deletion</li><li>We will process your request within 30 days</li></ul></div><h2>What Happens After Deletion</h2><ul><li>All your personal information will be permanently deleted</li><li>Complaint records linked to your number will be anonymized</li><li>You will receive a confirmation once deletion is complete</li></ul><h2>Contact</h2><p>Vasai Virar City Municipal Corporation<br>Website: https://straydogbot.onrender.com<br>Email: vvcmc@vasaivirar.gov.in</p></body></html>`;
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end(html); return;
     }
+    if (url.pathname === '/data-deletion') {
+      const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Data Deletion - VVCMC Stray Dog Bot</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#333;line-height:1.6}h1{color:#1a6b3a}h2{color:#333;margin-top:30px}.box{background:#f5f5f5;padding:20px;border-radius:8px;margin:20px 0}</style></head><body><h1>Data Deletion Request</h1><p>Last updated: March 17, 2026</p><p>If you would like to request deletion of your personal data collected by the <strong>VVCMC Stray Dog Complaint Bot</strong>, please follow the steps below.</p><h2>What Data We Store</h2><ul><li>Your WhatsApp phone number</li><li>Your name</li><li>Complaint location</li><li>Photos/videos submitted with complaints</li><li>Date and time of complaints</li></ul><h2>How to Request Data Deletion</h2><div class="box"><p>Send an email to <strong>vvcmc@vasaivirar.gov.in</strong> with:</p><ul><li>Subject: <strong>Data Deletion Request - VVCMC Bot</strong></li><li>Your WhatsApp phone number</li><li>Your name</li></ul><p>We will process your request within <strong>30 days</strong> and confirm deletion via email.</p></div><h2>Automatic Data Deletion</h2><p>Complaint records older than 2 years are automatically deleted from our system.</p><h2>Contact Us</h2><p>For any queries regarding data deletion:</p><ul><li>Email: vvcmc@vasaivirar.gov.in</li><li>Website: <a href="https://straydogbot.onrender.com">https://straydogbot.onrender.com</a></li></ul><p><em>Vasai Virar City Municipal Corporation</em></p></body></html>`;
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end(html); return;
+    }
     if (url.pathname === '/delete') {
       const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Data Deletion - VVCMC Stray Dog Bot</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#333;line-height:1.6}h1{color:#1a6b3a}h2{color:#333;margin-top:30px}.box{background:#f5f5f5;padding:20px;border-radius:8px;margin:20px 0}</style></head><body><h1>User Data Deletion Request</h1><p>Last updated: March 17, 2026</p><p>As a user of the <strong>VVCMC Stray Dog Complaint Bot</strong>, you have the right to request deletion of your personal data.</p><h2>What Data We Store</h2><ul><li>Your WhatsApp phone number</li><li>Your name</li><li>Complaint location</li><li>Photos/videos submitted with complaints</li><li>Complaint history</li></ul><h2>How to Request Data Deletion</h2><div class="box"><p>To request deletion of your data, please contact us via:</p><ul><li><strong>Email:</strong> vvcmc@vasaivirar.gov.in</li><li><strong>WhatsApp:</strong> Send "DELETE MY DATA" to our bot number</li><li><strong>Visit:</strong> VVCMC Office, Vasai Virar, Maharashtra</li></ul><p>Please include your WhatsApp number in your request. We will process your request within <strong>30 days</strong>.</p></div><h2>What Happens After Deletion</h2><ul><li>All your personal information will be permanently deleted</li><li>Complaint records will be anonymized</li><li>You will receive a confirmation once deletion is complete</li></ul><h2>Contact Us</h2><p>Email: vvcmc@vasaivirar.gov.in</p><p>Website: <a href="https://straydogbot.onrender.com">https://straydogbot.onrender.com</a></p></body></html>`;
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end(html); return;
@@ -520,11 +518,10 @@ require('http').createServer(async (req, res) => {
         const msgObj = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
         if (!msgObj) return;
         const from   = msgObj.from;
-        console.log('[DEBUG] Message from:', from);
         const driver = DRIVERS.find(d => d.phone === from);
-        if      (isAdmin(from))  await handleAdmin(from, (msgObj.text?.body || '').trim());
-        else if (driver)         await handleDriver(from, msgObj, driver);
-        else                     await handleCitizen(from, msgObj);
+        if      (from === GS_NUMBER) await handleAdmin(from, (msgObj.text?.body || '').trim());
+        else if (driver)             await handleDriver(from, msgObj, driver);
+        else                         await handleCitizen(from, msgObj);
       } catch (err) { console.error('[handler error]', err.message); }
     });
     return;
