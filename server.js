@@ -25,15 +25,12 @@ function nowIST() {
 
 async function sendWA(to, body) {
   if (!to || to.includes('X')) return;
-  console.log('[sendWA] to:', to);
   const res = await fetch(`https://graph.facebook.com/v19.0/${process.env.WA_PHONE_NUMBER_ID}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` },
     body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body } }),
   });
-  const txt = await res.text();
-  if (!res.ok) console.error('[sendWA ERROR] to:', to, 'status:', res.status, 'resp:', txt);
-  else console.log('[sendWA OK] to:', to, 'resp:', txt);
+  if (!res.ok) console.error('[sendWA error]', await res.text());
 }
 
 async function forwardMedia(to, mediaId, mediaType, caption) {
@@ -102,11 +99,11 @@ const ticketCounters = {};
 function genRef() {
   const now = new Date();
   const mon = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short' }).toUpperCase();
-  const key = `${now.getFullYear()}-${mon}`;
+  const key = now.getFullYear() + '-' + mon;
   if (!ticketCounters[key]) ticketCounters[key] = 0;
   ticketCounters[key]++;
   const num = String(ticketCounters[key]).padStart(5, '0');
-  return `VVCMC-STRAY-${mon}-${num}`;
+  return 'VVCMC-STRAY-' + mon + '-' + num;
 }
 
 const INCIDENT = {
@@ -175,7 +172,7 @@ _काम झाल्यावर *ticket* टाइप करा._`);
   }
 
   // STEP 1 — Admin sends ASSIGN command
-  const m = text.match(/ASSIGN\s+(SDB-[A-Z0-9]+)\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
+  const m = text.match(/ASSIGN\s+(VVCMC-STRAY-[A-Z0-9-]+)\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
   if (m) {
     const [, ref, driverId, date, time] = m;
     const ticket = tickets[ref];
@@ -211,7 +208,7 @@ _काम झाल्यावर *ticket* टाइप करा._`);
   }
 
   // STEP 1B — Admin sends just ticket ref to start selection
-  const refOnly = text.match(/^(SDB-[A-Z0-9]+)$/i);
+  const refOnly = text.match(/^(VVCMC-STRAY-[A-Z0-9-]+)$/i);
   if (refOnly) {
     const ref = refOnly[1].toUpperCase();
     const ticket = tickets[ref];
@@ -245,7 +242,7 @@ _Reply with 1 or 2_`);
     msg += `✅ No open tickets right now!\n\n`;
   }
 
-  msg += `*Manual assign:*\nASSIGN SDB-XXX DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`;
+  msg += `*Manual assign:*\nASSIGN VVCMC-STRAY-MAR-00001 DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`;
   await sendWA(from, msg);
 }
 
