@@ -1,6 +1,6 @@
 'use strict';
 
-const GS_NUMBER = '917219373694';
+const GS_NUMBER = '919820349477';
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
@@ -95,15 +95,17 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
   } catch (e) { console.error('[atClose exception]', e.message); }
 }
 
-const ticketCounters = {};
+/* ── TICKET NUMBER GENERATOR ── */
+let ticketCounter = 3; // starts from 3 since 1 and 2 already exist in Airtable
+
 function genRef() {
   const now = new Date();
-  const mon = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short' }).toUpperCase();
-  const key = now.getFullYear() + '-' + mon;
-  if (!ticketCounters[key]) ticketCounters[key] = 0;
-  ticketCounters[key]++;
-  const num = String(ticketCounters[key]).padStart(5, '0');
-  return 'VVCMC-STRAY-' + mon + '-' + num;
+  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const month = months[now.getMonth()];
+  const year = now.getFullYear();
+  const num = String(ticketCounter).padStart(5, '0');
+  ticketCounter++;
+  return `VVCMC-STRAY-${month}-${num}`;
 }
 
 const INCIDENT = {
@@ -172,7 +174,7 @@ _काम झाल्यावर *ticket* टाइप करा._`);
   }
 
   // STEP 1 — Admin sends ASSIGN command
-  const m = text.match(/ASSIGN\s+(VVCMC-STRAY-[A-Z0-9-]+)\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
+  const m = text.match(/ASSIGN\s+(SDB-[A-Z0-9]+)\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
   if (m) {
     const [, ref, driverId, date, time] = m;
     const ticket = tickets[ref];
@@ -208,7 +210,7 @@ _काम झाल्यावर *ticket* टाइप करा._`);
   }
 
   // STEP 1B — Admin sends just ticket ref to start selection
-  const refOnly = text.match(/^(VVCMC-STRAY-[A-Z0-9-]+)$/i);
+  const refOnly = text.match(/^(SDB-[A-Z0-9]+)$/i);
   if (refOnly) {
     const ref = refOnly[1].toUpperCase();
     const ticket = tickets[ref];
@@ -242,7 +244,7 @@ _Reply with 1 or 2_`);
     msg += `✅ No open tickets right now!\n\n`;
   }
 
-  msg += `*Manual assign:*\nASSIGN VVCMC-STRAY-MAR-00001 DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`;
+  msg += `*Manual assign:*\nASSIGN SDB-XXX DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`;
   await sendWA(from, msg);
 }
 
@@ -519,7 +521,7 @@ require('http').createServer(async (req, res) => {
         if (!msgObj) return;
         const from   = msgObj.from;
         const driver = DRIVERS.find(d => d.phone === from);
-        if      (from === GS_NUMBER || from === GS_NUMBER.replace(/^91/, '')) await handleAdmin(from, (msgObj.text?.body || '').trim());
+        if      (from === GS_NUMBER) await handleAdmin(from, (msgObj.text?.body || '').trim());
         else if (driver)             await handleDriver(from, msgObj, driver);
         else                         await handleCitizen(from, msgObj);
       } catch (err) { console.error('[handler error]', err.message); }
