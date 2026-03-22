@@ -519,7 +519,7 @@ require('http').createServer(async (req, res) => {
         if (!msgObj) return;
         const from   = msgObj.from;
         const driver = DRIVERS.find(d => d.phone === from);
-        if      (from === GS_NUMBER) await handleAdmin(from, (msgObj.text?.body || '').trim());
+        if      (from === GS_NUMBER || from === GS_NUMBER.replace(/^91/, '')) await handleAdmin(from, (msgObj.text?.body || '').trim());
         else if (driver)             await handleDriver(from, msgObj, driver);
         else                         await handleCitizen(from, msgObj);
       } catch (err) { console.error('[handler error]', err.message); }
