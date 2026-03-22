@@ -1,12 +1,10 @@
 'use strict';
 
 const GS_NUMBER = '917219373694';
-const GS_NUMBER_ALT = '7219373694'; // fallback without country code
 
 function isAdmin(from) {
-  return from === GS_NUMBER || from === GS_NUMBER_ALT;
+  return from === '917219373694' || from === '7219373694';
 }
-const isAdmin = (from) => from === GS_NUMBER || from === '7219373694' || from.endsWith('7219373694');
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
