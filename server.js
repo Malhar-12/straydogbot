@@ -594,20 +594,26 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     s.data.mediaUrl = mUrl; s.data.mediaId = mId; s.data.mediaType = mType;
     s.data.lang = s.lang;
 
-    const ref   = await getNextTicketNumber();
-    const atId  = await atCreate(ref, s.data);
+    // Get ticket number first (needed for messages)
+    const ref = await getNextTicketNumber();
     s.step = 'done'; s.ref = ref;
 
-    await sendWA(from, s.lang === 'mr'
+    // Send citizen confirmation IMMEDIATELY — don't wait for Airtable
+    const citizenConfirm = s.lang === 'mr'
       ? `✅ *तुमची तक्रार नोंदवली गेली!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *तक्रार:* ${s.data.incidentLabel}\n📍 *ठिकाण:* ${s.data.location}\n🕐 *वेळ:* ${s.data.incidentTime}\n\nआमचा अधिकारी लवकरच संपर्क करेल.\n*धन्यवाद! VVCMC 🙏*`
-      : `✅ *Your complaint has been registered!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *Issue:* ${s.data.incidentLabel}\n📍 *Location:* ${s.data.location}\n🕐 *Time:* ${s.data.incidentTime}\n\nOur officer will contact you shortly.\n*Thank you! VVCMC 🙏*`);
+      : `✅ *Your complaint has been registered!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *Issue:* ${s.data.incidentLabel}\n📍 *Location:* ${s.data.location}\n🕐 *Time:* ${s.data.incidentTime}\n\nOur officer will contact you shortly.\n*Thank you! VVCMC 🙏*`;
 
     const adminAlert = s.lang === 'mr'
       ? `🚨 *नवीन तक्रार — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *तक्रार:* ${s.data.incidentLabel}\n👤 *नाव:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *ठिकाण:* ${s.data.location}\n📞 *Alt:* ${s.data.altContact || 'N/A'}\n🕐 *वेळ:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref to assign:_\n*${ref}*`
       : `🚨 *New Complaint — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *Issue:* ${s.data.incidentLabel}\n👤 *Name:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *Location:* ${s.data.location}\n📞 *Alt Contact:* ${s.data.altContact || 'N/A'}\n🕐 *Time:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref to assign:_\n*${ref}*`;
 
-    await sendWA(GS_NUMBER, adminAlert);
-    if (mId) await forwardMedia(GS_NUMBER, mId, mType, s.lang === 'mr' ? `📸 पुरावा — ${ref}` : `📸 Evidence — ${ref}`);
+    // Run all 4 things in PARALLEL — much faster!
+    await Promise.all([
+      sendWA(from, citizenConfirm),
+      sendWA(GS_NUMBER, adminAlert),
+      atCreate(ref, s.data),
+      mId ? forwardMedia(GS_NUMBER, mId, mType, s.lang === 'mr' ? `📸 पुरावा — ${ref}` : `📸 Evidence — ${ref}`) : Promise.resolve(),
+    ]);
     return;
   }
 
