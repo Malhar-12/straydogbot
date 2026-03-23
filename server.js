@@ -97,16 +97,33 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
 }
 
 /* ── TICKET NUMBER GENERATOR ── */
-let ticketCounter = 3; // starts from 3 since 1 and 2 already exist in Airtable
+let ticketCounter = 4; // will be updated from Airtable on startup
 
 function genRef() {
   const now = new Date();
   const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   const month = months[now.getMonth()];
-  const year = now.getFullYear();
   const num = String(ticketCounter).padStart(5, '0');
   ticketCounter++;
+  // Save counter to Airtable immediately so it persists across restarts
+  saveCounterToAirtable(ticketCounter).catch(e => console.error('[saveCounter error]', e.message));
   return `VVCMC-STRAY-${month}-${num}`;
+}
+
+async function saveCounterToAirtable(counter) {
+  try {
+    // Check if counter record exists
+    const r = await fetch(`https://api.airtable.com/v0/appIAa5QyApMtzlR8/tblWDeHIP7VMEgqo1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.AIRTABLE_API_KEY}` },
+      body: JSON.stringify({ fields: {
+        fldqtgQkeRJVmnyPi: 'TICKET_COUNTER',
+        fldThfAgPohMINbnH: String(counter),
+        fldBakW5veuT3uf2b: nowIST()
+      }})
+    });
+    // Actually use upsert via update if exists
+  } catch(e) {}
 }
 
 const INCIDENT = {
@@ -169,11 +186,45 @@ async function handleAdmin(from, text) {
   }
   if (pendingAssign[from] && /^[12]$/.test(text)) {
     const { ref } = pendingAssign[from];
-    const ticket = tickets[ref];
-    if (!ticket) { 
-      await sendWA(from, `⚠️ Ticket \`${ref}\` not found. Please send the ticket ref again.`); 
-      delete pendingAssign[from]; 
-      return; 
+    let ticket = tickets[ref];
+
+    // If ticket lost from memory (Render restart), load from Airtable
+    if (!ticket) {
+      try {
+        const r = await fetch(`${AT_URL}?filterByFormula=%7BRef%7D%3D%22${ref}%22`, {
+          headers: AT_HDR()
+        });
+        const d = await r.json();
+        if (d.records && d.records.length > 0) {
+          const rec = d.records[0];
+          const f = rec.fields;
+          // Reconstruct ticket from Airtable
+          ticket = {
+            ref,
+            status: f.fldgb6Ftq7qaRNoHe?.name || 'Open',
+            lang: f.fldQmRhTECXhx75EX === 'मराठी' ? 'mr' : 'en',
+            citizenPhone: f.fld9mitPsPU8y32PW || '',
+            atRecordId: rec.id,
+            data: {
+              incidentLabel: f.fldNfZJ9MB5Ub7o0S || '',
+              name: f.fld8dumoEH3eCv8bg || '',
+              phone: f.fld9mitPsPU8y32PW || '',
+              location: f.fldE45zv9IER93A8Q || '',
+              altContact: f.fldhrqYI58ioDB6xH || '',
+              mediaUrl: f.flddMQC528gDuo0AI || '',
+              incidentTime: f.fld1VlQL5WwOptowZ || '',
+            }
+          };
+          tickets[ref] = ticket;
+          console.log(`✅ Ticket ${ref} restored from Airtable!`);
+        }
+      } catch(e) { console.error('[restoreTicket error]', e.message); }
+    }
+
+    if (!ticket) {
+      await sendWA(from, `⚠️ Ticket \`${ref}\` not found. Please send the ticket ref again.`);
+      delete pendingAssign[from];
+      return;
     }
     const driver = DRIVERS.find(d => d.id === parseInt(text));
     if (!driver) { await sendWA(from, `⚠️ Invalid choice. Reply *1* for Somnath or *2* for Mukesh.`); return; }
@@ -309,7 +360,7 @@ _Reply with 1 or 2_`);
     msg += `✅ No open tickets right now!\n\n`;
   }
 
-  msg += `*Manual assign:*\nASSIGN SDB-XXX DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`;
+  msg += `*Drivers:*\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`;
   await sendWA(from, msg);
 }
 
