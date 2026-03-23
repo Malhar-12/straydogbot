@@ -353,13 +353,15 @@ async function showOpenTickets(from) {
       headers: AT_HDR()
     });
     const d = await r.json();
+    console.log('[DEBUG tickets] total records:', d.records?.length, '| first status:', JSON.stringify(d.records?.[0]?.fields?.fldgb6Ftq7qaRNoHe));
     const open = (d.records || []).filter(rec => {
-      const status = rec.fields?.fldgb6Ftq7qaRNoHe?.name || rec.fields?.fldgb6Ftq7qaRNoHe || '';
+      const s = rec.fields?.fldgb6Ftq7qaRNoHe;
+      const status = (typeof s === 'object' ? s?.name : s) || '';
       return status === 'Open';
     });
 
     if (open.length === 0) {
-      await sendWA(from, `📋 *Admin Panel — VVCMC Bot*\n\n✅ सध्या कोणतीही Open तक्रार नाही!\n(No open tickets right now!)`);
+      await sendWA(from, `📋 *Admin Panel — VVCMC Bot*\n\n✅ No open tickets right now!\n\n*Manual assign:*\nASSIGN VVCMC-STRAY-MON-00001 DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n1. Somnath Catcher  +917218082442\n2. Mukesh Catcher  +919373246128`);
       return;
     }
 
