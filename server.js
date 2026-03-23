@@ -2,7 +2,6 @@
 
 /* ── CONFIG ── */
 const GS_NUMBER  = '919820349477';
-const DEV_NUMBER = '919890044455';
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
@@ -696,8 +695,7 @@ require('http').createServer(async (req, res) => {
         if (!msgObj) return;
         const from   = msgObj.from;
         const driver = DRIVERS.find(d => d.phone === from);
-        const isAuthorized = from === GS_NUMBER || from === DEV_NUMBER;
-        if      (isAuthorized) await handleAdmin(from, (msgObj.text?.body || '').trim());
+        if      (from === GS_NUMBER) await handleAdmin(from, (msgObj.text?.body || '').trim());
         else if (driver)       await handleDriver(from, msgObj, driver);
         else                   await handleCitizen(from, msgObj);
       } catch (err) { console.error('[handler error]', err.message, err.stack); }
