@@ -2,39 +2,20 @@
 
 /* ── CONFIG ── */
 const GS_NUMBER  = '919820349477';
+const DEV_NUMBER = '919890044455';
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
 ];
 
-/* ── AIRTABLE CONFIG ── */
-const AT_BASE      = 'appIAa5QyApMtzlR8';
-const AT_COMPLAINTS = 'tblLhgEATdVGkWhGo';
-const AT_SETTINGS   = 'tblWDeHIP7VMEgqo1';
-const AT_HDR = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.AIRTABLE_API_KEY}` });
-const AT_URL = `https://api.airtable.com/v0/${AT_BASE}/${AT_COMPLAINTS}`;
-const ST_URL = `https://api.airtable.com/v0/${AT_BASE}/${AT_SETTINGS}`;
+/* ── IN-MEMORY STORES (fast, no API delay) ── */
+const sessions     = {}; // citizen conversation state
+const tickets      = {}; // all tickets in memory
+const pendingAssign = {}; // admin pending driver selection
 
-/* ── SETTINGS IDs ── */
-const TOKEN_RECORD_ID   = 'recfOnsA8Ce8XmTqI';
-const COUNTER_RECORD_ID = 'recBwmnV29BQbSI3f';
-
-/* ── AIRTABLE SETTINGS HELPERS ── */
-async function getSetting(recordId) {
-  try {
-    const r = await fetch(`${ST_URL}/${recordId}`, { headers: AT_HDR() });
-    const d = await r.json();
-    return d.fields?.fldThfAgPohMINbnH || null;
-  } catch { return null; }
-}
-
-async function setSetting(recordId, value) {
-  try {
-    await fetch(`${ST_URL}/${recordId}`, {
-      method: 'PATCH', headers: AT_HDR(),
-      body: JSON.stringify({ fields: { fldThfAgPohMINbnH: String(value), fldBakW5veuT3uf2b: nowIST() } })
-    });
-  } catch(e) { console.error('[setSetting error]', e.message); }
+function getSession(from) {
+  if (!sessions[from]) sessions[from] = { step: 'greet', lang: null, data: {} };
+  return sessions[from];
 }
 
 /* ── TIME ── */
@@ -68,13 +49,24 @@ async function forwardMedia(to, mediaId, mediaType, caption) {
 
 async function getMediaUrl(mediaId) {
   try {
-    const res = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, { headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` } });
+    const res = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`,
+      { headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` } });
     const data = await res.json();
     return data.url || '';
   } catch { return ''; }
 }
 
-/* ── AIRTABLE TICKET HELPERS ── */
+/* ── AIRTABLE (only for saving data — not for reading!) ── */
+const AT_BASE = 'appIAa5QyApMtzlR8';
+const AT_TABLE = 'tblLhgEATdVGkWhGo';
+const AT_SETTINGS = 'tblWDeHIP7VMEgqo1';
+const AT_URL = `https://api.airtable.com/v0/${AT_BASE}/${AT_TABLE}`;
+const ST_URL = `https://api.airtable.com/v0/${AT_BASE}/${AT_SETTINGS}`;
+const AT_HDR = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.AIRTABLE_API_KEY}` });
+
+const COUNTER_RECORD_ID = 'recBwmnV29BQbSI3f';
+const TOKEN_RECORD_ID   = 'recfOnsA8Ce8XmTqI';
+
 async function atCreate(ref, data) {
   try {
     const res = await fetch(AT_URL, {
@@ -127,55 +119,35 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
   } catch (e) { console.error('[atClose exception]', e.message); }
 }
 
-/* ── LOAD TICKET FROM AIRTABLE ── */
-async function loadTicketFromAirtable(ref) {
+/* ── TICKET COUNTER — read once on startup, then keep in memory ── */
+let ticketCounter = 10; // safe default, will be updated from Airtable
+
+async function loadCounter() {
   try {
-    const encodedRef = encodeURIComponent(ref);
-    const r = await fetch(`${AT_URL}?filterByFormula=SEARCH(%22${encodedRef}%22%2C%7BRef%7D)&pageSize=1`, {
-      headers: AT_HDR()
-    });
+    const r = await fetch(`${ST_URL}/${COUNTER_RECORD_ID}`, { headers: AT_HDR() });
     const d = await r.json();
-    if (d.records && d.records.length > 0) {
-      const rec = d.records[0];
-      const f = rec.fields;
-      return {
-        ref,
-        status: f.fldgb6Ftq7qaRNoHe?.name || 'Open',
-        lang: f.fldQmRhTECXhx75EX === 'मराठी' ? 'mr' : 'en',
-        citizenPhone: f.fld9mitPsPU8y32PW || '',
-        driverName: f.fldQ85dcRt82zeQGJ || '',
-        atRecordId: rec.id,
-        data: {
-          incidentLabel: f.fldNfZJ9MB5Ub7o0S || '',
-          name: f.fld8dumoEH3eCv8bg || '',
-          phone: f.fld9mitPsPU8y32PW || '',
-          location: f.fldE45zv9IER93A8Q || '',
-          altContact: f.fldhrqYI58ioDB6xH || '',
-          mediaUrl: f.flddMQC528gDuo0AI || '',
-          mediaType: f.fld5idjsIpkMglZMV || '',
-          incidentTime: f.fld1VlQL5WwOptowZ || '',
-        }
-      };
-    }
-  } catch(e) { console.error('[loadTicket error]', e.message); }
-  return null;
+    const val = parseInt(d.fields?.fldThfAgPohMINbnH);
+    if (val && val > ticketCounter) { ticketCounter = val; }
+    console.log(`✅ Counter loaded: ${ticketCounter}`);
+  } catch(e) { console.error('[loadCounter error]', e.message); }
 }
 
-/* ── TICKET NUMBER — persistent via Airtable ── */
-let ticketCounter = 4;
-
-async function getNextTicketNumber() {
+async function saveCounter(val) {
   try {
-    const val = await getSetting(COUNTER_RECORD_ID);
-    if (val) ticketCounter = parseInt(val) || 4;
-  } catch {}
-  const now = new Date();
+    await fetch(`${ST_URL}/${COUNTER_RECORD_ID}`, {
+      method: 'PATCH', headers: AT_HDR(),
+      body: JSON.stringify({ fields: { fldThfAgPohMINbnH: String(val), fldBakW5veuT3uf2b: nowIST() } })
+    });
+  } catch(e) { console.error('[saveCounter error]', e.message); }
+}
+
+function genRef() {
   const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-  const month = months[now.getMonth()];
+  const month = months[new Date().getMonth()];
   const num = String(ticketCounter).padStart(5, '0');
   const ref = `VVCMC-STRAY-${month}-${num}`;
   ticketCounter++;
-  await setSetting(COUNTER_RECORD_ID, ticketCounter);
+  saveCounter(ticketCounter).catch(() => {}); // save async, don't wait
   return ref;
 }
 
@@ -203,101 +175,44 @@ function parseLocation(text) {
   return null;
 }
 
-/* ── IN-MEMORY SESSION STORE (citizen flow only — short lived) ── */
-const sessions = {};
-function getSession(from) {
-  if (!sessions[from]) sessions[from] = { step: 'greet', lang: null, data: {} };
-  return sessions[from];
-}
-
-/* ── PENDING ASSIGN — stored in Airtable Settings ── */
-async function savePendingAssign(adminPhone, ref) {
-  try {
-    // Check if record exists first
-    const r = await fetch(`${ST_URL}`, { headers: AT_HDR() });
-    const d = await r.json();
-    const existing = d.records?.find(rec => rec.fields?.fldqtgQkeRJVmnyPi === `PENDING_${adminPhone}`);
-    if (existing) {
-      await fetch(`${ST_URL}/${existing.id}`, {
-        method: 'PATCH', headers: AT_HDR(),
-        body: JSON.stringify({ fields: { fldThfAgPohMINbnH: ref, fldBakW5veuT3uf2b: nowIST() } })
-      });
-    } else {
-      await fetch(ST_URL, {
-        method: 'POST', headers: AT_HDR(),
-        body: JSON.stringify({ fields: { fldqtgQkeRJVmnyPi: `PENDING_${adminPhone}`, fldThfAgPohMINbnH: ref, fldBakW5veuT3uf2b: nowIST() } })
-      });
-    }
-  } catch(e) { console.error('[savePending error]', e.message); }
-}
-
-async function loadPendingAssign(adminPhone) {
-  try {
-    const r = await fetch(`${ST_URL}`, { headers: AT_HDR() });
-    const d = await r.json();
-    const rec = d.records?.find(r => r.fields?.fldqtgQkeRJVmnyPi === `PENDING_${adminPhone}`);
-    return rec?.fields?.fldThfAgPohMINbnH || null;
-  } catch { return null; }
-}
-
-async function clearPendingAssign(adminPhone) {
-  try {
-    const r = await fetch(`${ST_URL}`, { headers: AT_HDR() });
-    const d = await r.json();
-    const rec = d.records?.find(r => r.fields?.fldqtgQkeRJVmnyPi === `PENDING_${adminPhone}`);
-    if (rec) {
-      await fetch(`${ST_URL}/${rec.id}`, {
-        method: 'PATCH', headers: AT_HDR(),
-        body: JSON.stringify({ fields: { fldThfAgPohMINbnH: '' } })
-      });
-    }
-  } catch {}
-}
-
-/* ── GS / ADMIN HANDLER ── */
+/* ── ADMIN HANDLER ── */
 async function handleAdmin(from, text) {
 
-  // TOKEN UPDATE COMMAND
+  // TOKEN UPDATE
   if (text.startsWith('UPDATE-TOKEN:')) {
     const newToken = text.replace('UPDATE-TOKEN:', '').trim();
     if (newToken.length > 50) {
       process.env.WA_ACCESS_TOKEN = newToken;
-      await setSetting(TOKEN_RECORD_ID, newToken);
-      await sendWA(from, '✅ Token updated successfully! Bot will now work properly.');
-      console.log('✅ Token updated via WhatsApp!');
+      // Save to Airtable async
+      fetch(`${ST_URL}/${TOKEN_RECORD_ID}`, {
+        method: 'PATCH', headers: AT_HDR(),
+        body: JSON.stringify({ fields: { fldThfAgPohMINbnH: newToken, fldBakW5veuT3uf2b: nowIST() } })
+      }).catch(() => {});
+      await sendWA(from, '✅ Token updated! Bot is working now.');
     } else {
-      await sendWA(from, '⚠️ Invalid token. Send: UPDATE-TOKEN:yourNewTokenHere');
+      await sendWA(from, '⚠️ Invalid token. Send: UPDATE-TOKEN:yourNewToken');
     }
     return;
   }
 
-  // STEP 2 — Admin selected driver 1 or 2
-  if (/^[12]$/.test(text)) {
-    // Load pending ref from Airtable
-    const ref = await loadPendingAssign(from);
-    if (!ref) {
-      // No pending — show open tickets
-      await showOpenTickets(from);
-      return;
-    }
+  // STEP 2 — Driver selection (1 or 2)
+  if (/^[12]$/.test(text) && pendingAssign[from]) {
+    const { ref } = pendingAssign[from];
+    const ticket = tickets[ref];
 
-    // Load ticket from Airtable
-    let ticket = await loadTicketFromAirtable(ref);
     if (!ticket) {
-      await sendWA(from, `⚠️ Ticket \`${ref}\` not found. Please send the ticket ref again.`);
-      await clearPendingAssign(from);
+      await sendWA(from, `⚠️ Ticket \`${ref}\` not found in memory.\nBot restart झाले असेल. कृपया ticket ref परत पाठवा.`);
+      delete pendingAssign[from];
       return;
     }
 
     const driver = DRIVERS.find(d => d.id === parseInt(text));
-    if (!driver) { await sendWA(from, `⚠️ Invalid. Reply *1* for Somnath or *2* for Mukesh.`); return; }
+    delete pendingAssign[from];
 
-    await clearPendingAssign(from);
+    ticket.status = 'Assigned';
+    ticket.driverName = driver.name;
 
-    // Update Airtable
-    if (ticket.atRecordId) await atAssign(ticket.atRecordId, driver.name, driver.phone);
-
-    // Notify ONLY selected driver
+    // Notify driver
     await sendWA(driver.phone,
 `📋 *तुम्हाला काम सोपवले गेले आहे!*
 🎫 Ref: ${ref}
@@ -311,29 +226,40 @@ _काम झाल्यावर *ticket* टाइप करा._`);
 
     // Notify citizen
     const citizenMsg = ticket.lang === 'mr'
-      ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*\n🎫 Ticket: ${ref}\n👤 *अधिकारी:* ${driver.name}\n\n_ते येण्यापूर्वी फोन करतील._`
-      : `👷 *Your complaint has been assigned to an officer!*\n🎫 Ticket: ${ref}\n👤 *Officer:* ${driver.name}\n\n_He will call before arriving._`;
+      ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*\n🎫 ${ref}\n👤 *अधिकारी:* ${driver.name}\n\n_ते येण्यापूर्वी फोन करतील._`
+      : `👷 *Your complaint has been assigned!*\n🎫 ${ref}\n👤 *Officer:* ${driver.name}\n\n_He will call before arriving._`;
     await sendWA(ticket.citizenPhone, citizenMsg);
+
+    // Update Airtable async
+    if (ticket.atRecordId) atAssign(ticket.atRecordId, driver.name, driver.phone).catch(() => {});
 
     await sendWA(from, `✅ *${ref}* → *${driver.name}*\nCitizen ✓  Driver ✓  Airtable ✓`);
     return;
   }
 
-  // STEP 1 — Admin sends ticket ref
+  // STEP 1 — Ticket ref received
   const refMatch = text.match(/^(VVCMC-STRAY-[A-Z]+-\d+|SDB-[A-Z0-9]+)$/i);
   if (refMatch) {
     const ref = refMatch[1].toUpperCase();
-    const ticket = await loadTicketFromAirtable(ref);
+    const ticket = tickets[ref];
+
     if (!ticket) {
-      await sendWA(from, `⚠️ Ticket \`${ref}\` not found in Airtable.`);
+      await sendWA(from,
+`⚠️ Ticket \`${ref}\` memory मध्ये सापडले नाही.
+
+*कारण:* Bot restart झाल्यावर memory clear होते.
+
+*Solution:* Complainer ला पुन्हा *Hi* पाठवायला सांगा — नवीन complaint file होईल!`);
       return;
     }
-    await savePendingAssign(from, ref);
+
+    pendingAssign[from] = { ref };
     await sendWA(from,
 `📋 *Ticket:* ${ref}
 🐕 ${ticket.data.incidentLabel}
 👤 ${ticket.data.name}
 📍 ${ticket.data.location}
+🕐 ${ticket.data.incidentTime}
 
 *Driver निवडा / Select driver:*
 1️⃣  Somnath Catcher
@@ -343,39 +269,29 @@ _Reply with 1 or 2_`);
     return;
   }
 
-  // Default — show open tickets
-  await showOpenTickets(from);
-}
+  // Default — show open tickets from memory
+  const openTickets = Object.values(tickets).filter(t => t.status === 'Open');
 
-async function showOpenTickets(from) {
-  try {
-    const r = await fetch(`${AT_URL}?fields[]=fldi3QMTASyf3FiH8&fields[]=fldNfZJ9MB5Ub7o0S&fields[]=fld8dumoEH3eCv8bg&fields[]=fldE45zv9IER93A8Q&fields[]=fldgb6Ftq7qaRNoHe&fields[]=fld1VlQL5WwOptowZ&sort[0][field]=fldi3QMTASyf3FiH8&sort[0][direction]=desc`, {
-      headers: AT_HDR()
-    });
-    const d = await r.json();
-    console.log('[DEBUG tickets] total records:', d.records?.length, '| first status:', JSON.stringify(d.records?.[0]?.fields?.fldgb6Ftq7qaRNoHe));
-    const open = (d.records || []).filter(rec => {
-      const s = rec.fields?.fldgb6Ftq7qaRNoHe;
-      const status = (typeof s === 'object' ? s?.name : s) || '';
-      return status === 'Open';
-    });
+  if (openTickets.length === 0) {
+    await sendWA(from,
+`📋 *Admin Panel — VVCMC Bot*
 
-    if (open.length === 0) {
-      await sendWA(from, `📋 *Admin Panel — VVCMC Bot*\n\n✅ No open tickets right now!\n\n*Manual assign:*\nASSIGN VVCMC-STRAY-MON-00001 DRIVER:1 DATE:16-Mar TIME:10:00AM\n\n*Drivers:*\n1. Somnath Catcher  +917218082442\n2. Mukesh Catcher  +919373246128`);
-      return;
-    }
+सध्या memory मध्ये कोणतीही Open तक्रार नाही.
 
-    let msg = `📋 *Admin Panel — VVCMC Bot*\n\n*Open Tickets:*\n━━━━━━━━━━\n`;
-    open.slice(0, 10).forEach((rec, i) => {
-      const f = rec.fields;
-      msg += `${i+1}. *${f.fldi3QMTASyf3FiH8}*\n   🐕 ${f.fldNfZJ9MB5Ub7o0S || ''}\n   👤 ${f.fld8dumoEH3eCv8bg || ''}\n   📍 ${(f.fldE45zv9IER93A8Q || '').slice(0,40)}\n\n`;
-    });
-    msg += `_Ticket ref पाठवा to assign_\n_e.g. ${open[0]?.fields?.fldi3QMTASyf3FiH8}_`;
-    await sendWA(from, msg);
-  } catch(e) {
-    console.error('[showOpenTickets error]', e.message);
-    await sendWA(from, `📋 *Admin Panel — VVCMC Bot*\n\nDrivers:\n${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`);
+*Note:* Bot restart नंतर memory clear होते.
+नवीन complaints आल्यावर येथे दिसतील.
+
+*Drivers:*
+${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`);
+    return;
   }
+
+  let msg = `📋 *Admin Panel — VVCMC Bot*\n\n*Open Tickets:*\n━━━━━━━━━━\n`;
+  openTickets.forEach((t, i) => {
+    msg += `${i+1}. *${t.ref}*\n   🐕 ${t.data.incidentLabel}\n   👤 ${t.data.name}\n   📍 ${t.data.location.slice(0,40)}\n   🕐 ${t.data.incidentTime}\n\n`;
+  });
+  msg += `_Ticket ref पाठवा to assign_`;
+  await sendWA(from, msg);
 }
 
 /* ── DRIVER HANDLER ── */
@@ -386,50 +302,32 @@ async function handleDriver(from, msgObj, driver) {
   const s        = getSession(from);
 
   if (/^ticket$/i.test(text)) {
-    // Load assigned tickets from Airtable
-    try {
-      const r = await fetch(`${AT_URL}?fields[]=fldi3QMTASyf3FiH8&fields[]=fldNfZJ9MB5Ub7o0S&fields[]=fld8dumoEH3eCv8bg&fields[]=fldE45zv9IER93A8Q&fields[]=fldQ85dcRt82zeQGJ&fields[]=fldgb6Ftq7qaRNoHe&fields[]=fld9mitPsPU8y32PW`, {
-        headers: AT_HDR()
-      });
-      const d = await r.json();
-      const mine = d.records?.filter(rec => {
-        const status = rec.fields?.fldgb6Ftq7qaRNoHe?.name || rec.fields?.fldgb6Ftq7qaRNoHe;
-        return status === 'Assigned' && rec.fields?.fldQ85dcRt82zeQGJ === driver.name;
-      }) || [];
-
-      if (!mine.length) { await sendWA(from, `📋 तुमच्यासाठी सध्या कोणतेही ticket नाही.\n(No open tickets assigned to you.)`); return; }
-
-      let list = `📋 *तुमचे Open Tickets:*\n━━━━━━━━━\n`;
-      mine.forEach((rec, i) => {
-        const f = rec.fields;
-        list += `${i+1}. ${f.fldi3QMTASyf3FiH8}\n   👤 ${f.fld8dumoEH3eCv8bg || ''}\n   📍 ${(f.fldE45zv9IER93A8Q || '').slice(0,50)}\n   🐕 ${f.fldNfZJ9MB5Ub7o0S || ''}\n\n`;
-      });
-      list += `_नंबर टाइप करा (e.g. 1)_`;
-      s.step = 'driver_select';
-      s.openTicketRefs = mine.map(r => r.fields.fldi3QMTASyf3FiH8);
-      await sendWA(from, list);
-    } catch(e) {
-      console.error('[driver ticket error]', e.message);
-      await sendWA(from, `⚠️ Error loading tickets. Try again.`);
+    const mine = Object.values(tickets).filter(t => t.status === 'Assigned' && t.driverName === driver.name);
+    if (!mine.length) {
+      await sendWA(from, `📋 तुमच्यासाठी सध्या कोणतेही ticket नाही.\n(No open tickets assigned to you.)`);
+      return;
     }
+    let list = `📋 *तुमचे Open Tickets:*\n━━━━━━━━━\n`;
+    mine.forEach((t, i) => {
+      list += `${i+1}. ${t.ref}\n   👤 ${t.data.name}\n   📍 ${t.data.location.slice(0,50)}\n   🐕 ${t.data.incidentLabel}\n   🕐 ${t.data.incidentTime}\n\n`;
+    });
+    list += `_नंबर टाइप करा (e.g. 1)_`;
+    s.step = 'driver_select'; s.openTickets = mine;
+    await sendWA(from, list);
     return;
   }
 
   if (s.step === 'driver_select') {
     const num = parseInt(text);
-    const ref = s.openTicketRefs?.[num-1];
-    if (!ref) { await sendWA(from, `⚠️ सापडले नाही. *ticket* टाइप करा.`); return; }
-    // Load from Airtable
-    const ticket = await loadTicketFromAirtable(ref);
-    if (!ticket) { await sendWA(from, `⚠️ Ticket not found.`); return; }
-    s.step = 'driver_location';
-    s.activeRef = ref;
-    s.activeTicket = ticket;
+    const selected = (!isNaN(num) && s.openTickets?.[num-1]) ? s.openTickets[num-1] : tickets[text.toUpperCase()];
+    if (!selected) { await sendWA(from, `⚠️ सापडले नाही. *ticket* टाइप करा.`); return; }
+    s.step = 'driver_location'; s.activeTicket = selected.ref;
     await sendWA(from,
-`✅ *Ticket:* ${ref}
-👤 ${ticket.data.name}
-📍 ${ticket.data.location}
-🐕 ${ticket.data.incidentLabel}
+`✅ *Ticket:* ${selected.ref}
+👤 ${selected.data.name}
+📍 ${selected.data.location}
+🐕 ${selected.data.incidentLabel}
+🕐 ${selected.data.incidentTime}
 
 Case बंद करण्यासाठी:
 1️⃣ *location* पाठवा (WhatsApp pin / Google Maps)
@@ -449,10 +347,9 @@ Case बंद करण्यासाठी:
 
   if (s.step === 'driver_photo') {
     if (!hasMedia) { await sendWA(from, `⚠️ फोटो किंवा व्हिडिओ पाठवणे अनिवार्य आहे.`); return; }
-    const ref    = s.activeRef;
-    let ticket = s.activeTicket;
-    if (!ticket) ticket = await loadTicketFromAirtable(ref);
-    if (!ticket) { await sendWA(from, `⚠️ Ticket not found.`); return; }
+    const ref    = s.activeTicket;
+    const ticket = tickets[ref];
+    if (!ticket) { await sendWA(from, `⚠️ Ticket सापडले नाही.`); return; }
 
     const mType    = msgObj.image ? 'image' : 'video';
     const mId      = msgObj.image?.id || msgObj.video?.id;
@@ -460,38 +357,34 @@ Case बंद करण्यासाठी:
     const loc      = s.closingLocation;
     const closedAt = nowIST();
 
-    if (ticket.atRecordId) await atClose(ticket.atRecordId, loc, driver.name, mUrl);
+    ticket.status = 'Closed';
 
     // Citizen closing message
     const citizenClose = ticket.lang === 'mr'
       ? `✅ *तुमची तक्रार सोडवली गेली आहे!*\n\n🎫 Ticket: ${ref}\n🐕 ${ticket.data.incidentLabel}\n👷 *अधिकारी:* ${driver.name}\n📍 *ठिकाण:* ${loc}\n🕐 *बंद:* ${closedAt}\n\nआमच्या टीमने समस्या सोडवली.\n_VVCMC सेवेत विश्वास ठेवल्याबद्दल धन्यवाद! 🙏_\n\nनवीन तक्रारीसाठी *Hi* पाठवा.`
       : `✅ *Your complaint has been resolved!*\n\n🎫 Ticket: ${ref}\n🐕 ${ticket.data.incidentLabel}\n👷 *Officer:* ${driver.name}\n📍 *Resolved at:* ${loc}\n🕐 *Closed at:* ${closedAt}\n\nOur team has addressed the problem.\n_Thank you for reporting to VVCMC! 🙏_\n\nSend *Hi* to file a new complaint.`;
 
-    await sendWA(ticket.citizenPhone, citizenClose);
-    if (mId) await forwardMedia(ticket.citizenPhone, mId, mType, ticket.lang === 'mr' ? '📸 काम पूर्ण झाल्याचा पुरावा' : '📸 Proof of work completed');
+    // Run in parallel for speed
+    await Promise.all([
+      sendWA(ticket.citizenPhone, citizenClose),
+      sendWA(GS_NUMBER, `✅ *Case Closed*\n🎫 ${ref}\n👷 ${driver.name}\n📍 ${loc}\n🕐 ${closedAt}\n👤 ${ticket.data.name}`),
+      mId ? forwardMedia(ticket.citizenPhone, mId, mType, ticket.lang === 'mr' ? '📸 काम पूर्ण झाल्याचा पुरावा' : '📸 Proof of work completed') : Promise.resolve(),
+      ticket.atRecordId ? atClose(ticket.atRecordId, loc, driver.name, mUrl) : Promise.resolve(),
+    ]);
 
-    await sendWA(GS_NUMBER,
-`✅ *Case Closed — VVCMC Bot*
-🎫 ${ref}
-🐕 ${ticket.data.incidentLabel}
-👷 Closed by: ${driver.name}
-📍 ${loc}
-🕐 ${closedAt}
-👤 ${ticket.data.name} (+${ticket.citizenPhone})`);
-    if (mId) await forwardMedia(GS_NUMBER, mId, mType, `Closing proof — ${ref}`);
+    if (mId) forwardMedia(GS_NUMBER, mId, mType, `Closing proof — ${ref}`).catch(() => {});
 
     await sendWA(from,
 `✅ *Case बंद केले!*
 🎫 ${ref}
 ✓ तक्रारदाराला कळवले
-✓ Photo sent to citizen
 ✓ Malhar sir ला कळवले
 ✓ Airtable → Closed
 
 _पुढील ticket साठी *ticket* टाइप करा._`);
 
     delete sessions[ticket.citizenPhone];
-    s.step = 'driver_idle'; s.activeRef = null; s.activeTicket = null; s.closingLocation = null;
+    s.step = 'driver_idle'; s.activeTicket = null; s.closingLocation = null;
     return;
   }
 
@@ -589,30 +482,39 @@ Welcome to VVCMC Stray Dog Complaint Bot!
         ? `⚠️ फोटो किंवा व्हिडिओ पाठवणे अनिवार्य आहे.`
         : `⚠️ Photo or video is mandatory. Please send one.`); return;
     }
+
     const mType = msgObj.image ? 'image' : 'video';
     const mId   = msgObj.image?.id || msgObj.video?.id;
+    s.data.mediaId = mId; s.data.mediaType = mType;
 
-    // Run getMediaUrl and getNextTicketNumber in PARALLEL — faster!
-    const [mUrl, ref] = await Promise.all([getMediaUrl(mId), getNextTicketNumber()]);
-    s.data.mediaUrl = mUrl; s.data.mediaId = mId; s.data.mediaType = mType;
-    s.data.lang = s.lang;
+    // Generate ticket ref IMMEDIATELY — no Airtable call needed
+    const ref = genRef();
+    const t = {
+      ref, status: 'Open', lang: s.lang,
+      citizenPhone: from, atRecordId: null,
+      data: { ...s.data }
+    };
+    tickets[ref] = t;
     s.step = 'done'; s.ref = ref;
 
-    // Send citizen confirmation IMMEDIATELY — don't wait for Airtable
+    // Build messages
     const citizenConfirm = s.lang === 'mr'
       ? `✅ *तुमची तक्रार नोंदवली गेली!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *तक्रार:* ${s.data.incidentLabel}\n📍 *ठिकाण:* ${s.data.location}\n🕐 *वेळ:* ${s.data.incidentTime}\n\nआमचा अधिकारी लवकरच संपर्क करेल.\n*धन्यवाद! VVCMC 🙏*`
       : `✅ *Your complaint has been registered!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *Issue:* ${s.data.incidentLabel}\n📍 *Location:* ${s.data.location}\n🕐 *Time:* ${s.data.incidentTime}\n\nOur officer will contact you shortly.\n*Thank you! VVCMC 🙏*`;
 
     const adminAlert = s.lang === 'mr'
-      ? `🚨 *नवीन तक्रार — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *तक्रार:* ${s.data.incidentLabel}\n👤 *नाव:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *ठिकाण:* ${s.data.location}\n📞 *Alt:* ${s.data.altContact || 'N/A'}\n🕐 *वेळ:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref to assign:_\n*${ref}*`
-      : `🚨 *New Complaint — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *Issue:* ${s.data.incidentLabel}\n👤 *Name:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *Location:* ${s.data.location}\n📞 *Alt Contact:* ${s.data.altContact || 'N/A'}\n🕐 *Time:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref to assign:_\n*${ref}*`;
+      ? `🚨 *नवीन तक्रार — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *तक्रार:* ${s.data.incidentLabel}\n👤 *नाव:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *ठिकाण:* ${s.data.location}\n📞 *Alt:* ${s.data.altContact || 'N/A'}\n🕐 *वेळ:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref:_\n*${ref}*`
+      : `🚨 *New Complaint — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *Issue:* ${s.data.incidentLabel}\n👤 *Name:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *Location:* ${s.data.location}\n📞 *Alt Contact:* ${s.data.altContact || 'N/A'}\n🕐 *Time:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref:_\n*${ref}*`;
 
-    // Run all 4 things in PARALLEL — much faster!
+    // Send messages and save to Airtable IN PARALLEL
+    const mUrl = await getMediaUrl(mId);
+    t.data.mediaUrl = mUrl;
+
     await Promise.all([
       sendWA(from, citizenConfirm),
       sendWA(GS_NUMBER, adminAlert),
-      atCreate(ref, s.data),
       mId ? forwardMedia(GS_NUMBER, mId, mType, s.lang === 'mr' ? `📸 पुरावा — ${ref}` : `📸 Evidence — ${ref}`) : Promise.resolve(),
+      atCreate(ref, { ...s.data, mediaUrl: mUrl }).then(atId => { if (atId) t.atRecordId = atId; }),
     ]);
     return;
   }
@@ -640,27 +542,39 @@ async function refreshToken() {
     const data = await res.json();
     if (data.access_token) {
       process.env.WA_ACCESS_TOKEN = data.access_token;
-      await setSetting(TOKEN_RECORD_ID, data.access_token);
-      console.log('✅ Token auto-refreshed!');
+      fetch(`${ST_URL}/${TOKEN_RECORD_ID}`, {
+        method: 'PATCH', headers: AT_HDR(),
+        body: JSON.stringify({ fields: { fldThfAgPohMINbnH: data.access_token, fldBakW5veuT3uf2b: nowIST() } })
+      }).catch(() => {});
+      console.log('✅ Token refreshed!');
     }
   } catch(e) { console.error('[refreshToken error]', e.message); }
 }
 
 /* ── STARTUP ── */
 async function startup() {
-  // Load token from Airtable
-  const token = await getSetting(TOKEN_RECORD_ID);
-  if (token && token.length > 50 && !token.includes('PASTE')) {
-    process.env.WA_ACCESS_TOKEN = token;
-    console.log('✅ Token loaded from Airtable!');
-  }
-  // Refresh token immediately
+  // Load token from Airtable (only 1 call on startup)
+  try {
+    const r = await fetch(`${ST_URL}/${TOKEN_RECORD_ID}`, { headers: AT_HDR() });
+    const d = await r.json();
+    const token = d.fields?.fldThfAgPohMINbnH;
+    if (token && token.length > 50 && !token.includes('PASTE')) {
+      process.env.WA_ACCESS_TOKEN = token;
+      console.log('✅ Token loaded from Airtable!');
+    }
+  } catch(e) { console.error('[loadToken error]', e.message); }
+
+  // Load counter (only 1 call on startup)
+  await loadCounter();
+
+  // Refresh token
   await refreshToken();
+
   // Auto refresh every 45 days
   setInterval(refreshToken, 45 * 24 * 60 * 60 * 1000);
-  console.log('✅ Bot ready! Auto token refresh every 45 days.');
+  console.log('✅ Bot ready!');
 }
-setTimeout(startup, 3000);
+setTimeout(startup, 2000);
 
 /* ── HTTP SERVER ── */
 const PORT = process.env.PORT || 3000;
@@ -674,15 +588,17 @@ require('http').createServer(async (req, res) => {
     if (mode === 'subscribe' && token === process.env.WA_VERIFY_TOKEN) { res.writeHead(200); res.end(challenge); return; }
     if (url.pathname === '/privacy') {
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-      res.end(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Privacy Policy - VVCMC</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.6}h1{color:#1a6b3a}</style></head><body><h1>Privacy Policy</h1><p>Last updated: March 23, 2026</p><p>This Privacy Policy applies to the <strong>VVCMC Stray Dog Complaint Bot</strong> operated by Vasai Virar City Municipal Corporation.</p><h2>Information We Collect</h2><ul><li>WhatsApp phone number</li><li>Name and location of incident</li><li>Photos/videos submitted with complaints</li><li>Complaint history and status</li></ul><h2>How We Use Your Information</h2><ul><li>Register and track your complaint</li><li>Assign municipal officers</li><li>Notify you about complaint status</li></ul><h2>Contact</h2><p>VVCMC, Vasai Virar, Maharashtra. Email: vvcmc@vasaivirar.gov.in</p></body></html>`);
+      res.end(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Privacy Policy - VVCMC</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.6}h1{color:#1a6b3a}</style></head><body><h1>Privacy Policy</h1><p>Last updated: March 23, 2026</p><p>This Privacy Policy applies to the <strong>VVCMC Stray Dog Complaint Bot</strong> operated by Vasai Virar City Municipal Corporation.</p><h2>Information We Collect</h2><ul><li>WhatsApp phone number</li><li>Name and location of incident</li><li>Photos/videos submitted</li></ul><h2>How We Use Your Information</h2><ul><li>Register and track complaints</li><li>Assign municipal officers</li><li>Notify you about status</li></ul><h2>Contact</h2><p>VVCMC, Vasai Virar, Maharashtra</p></body></html>`);
       return;
     }
     if (url.pathname === '/deletion') {
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-      res.end(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Data Deletion - VVCMC</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.6}h1{color:#c0392b}</style></head><body><h1>Data Deletion Request</h1><p>To request deletion of your data, contact us:</p><ul><li>Email: vvcmc@vasaivirar.gov.in</li><li>WhatsApp: Send "DELETE MY DATA" to our bot</li></ul><p>We will process your request within 30 days.</p></body></html>`);
+      res.end(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Data Deletion - VVCMC</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.6}h1{color:#c0392b}</style></head><body><h1>Data Deletion Request</h1><p>To request deletion of your data, contact: vvcmc@vasaivirar.gov.in</p><p>We will process your request within 30 days.</p></body></html>`);
       return;
     }
-    res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'}); res.end('VVCMC Stray Dog Bot is running! OK'); return;
+    res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'});
+    res.end('VVCMC Stray Dog Bot is running! OK');
+    return;
   }
 
   if (req.method === 'POST') {
@@ -696,12 +612,14 @@ require('http').createServer(async (req, res) => {
         if (!msgObj) return;
         const from   = msgObj.from;
         const driver = DRIVERS.find(d => d.phone === from);
-        if      (from === GS_NUMBER) await handleAdmin(from, (msgObj.text?.body || '').trim());
-        else if (driver)       await handleDriver(from, msgObj, driver);
-        else                   await handleCitizen(from, msgObj);
+        const isAdmin = from === GS_NUMBER || from === DEV_NUMBER;
+        if      (isAdmin)  await handleAdmin(from, (msgObj.text?.body || '').trim());
+        else if (driver)   await handleDriver(from, msgObj, driver);
+        else               await handleCitizen(from, msgObj);
       } catch (err) { console.error('[handler error]', err.message, err.stack); }
     });
     return;
   }
-  res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'}); res.end('VVCMC Stray Dog Bot is running! OK');
+  res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'});
+  res.end('VVCMC Stray Dog Bot is running! OK');
 }).listen(PORT, () => console.log(`✅ VVCMC Bot running on port ${PORT}`));
