@@ -154,19 +154,37 @@ async function handleAdmin(from, text) {
   }
 
   // STEP 2 — Admin selected a driver number (1 or 2)
+  // Load from Airtable if memory was lost due to restart
+  if (/^[12]$/.test(text) && !pendingAssign[from]) {
+    try {
+      const r = await fetch(`https://api.airtable.com/v0/appIAa5QyApMtzlR8/tblWDeHIP7VMEgqo1?filterByFormula=%7BKey%7D%3D%22PENDING_${from}%22`, {
+        headers: { Authorization: `Bearer ${process.env.AIRTABLE_API_KEY}` }
+      });
+      const d = await r.json();
+      if (d.records && d.records.length > 0) {
+        const savedRef = d.records[0].fields?.fldThfAgPohMINbnH;
+        if (savedRef) pendingAssign[from] = { ref: savedRef };
+      }
+    } catch(e) {}
+  }
   if (pendingAssign[from] && /^[12]$/.test(text)) {
-    const { ref, date, time } = pendingAssign[from];
+    const { ref } = pendingAssign[from];
     const ticket = tickets[ref];
-    if (!ticket) { await sendWA(from, `⚠️ Ticket \`${ref}\` not found. Bot restart झाले असेल.`); delete pendingAssign[from]; return; }
+    if (!ticket) { 
+      await sendWA(from, `⚠️ Ticket \`${ref}\` not found. Please send the ticket ref again.`); 
+      delete pendingAssign[from]; 
+      return; 
+    }
     const driver = DRIVERS.find(d => d.id === parseInt(text));
-    if (!driver) { await sendWA(from, `⚠️ Driver ${text} not found.`); return; }
+    if (!driver) { await sendWA(from, `⚠️ Invalid choice. Reply *1* for Somnath or *2* for Mukesh.`); return; }
 
     delete pendingAssign[from]; // clear pending
 
+    const assignedTime = nowIST();
     ticket.status = 'Assigned';
     ticket.driverName = driver.name;
-    ticket.visitDate = date;
-    ticket.visitTime = time;
+    ticket.visitDate = assignedTime;
+    ticket.visitTime = assignedTime;
 
     // Notify ONLY the selected driver
     await sendWA(driver.phone,
@@ -178,14 +196,13 @@ async function handleAdmin(from, text) {
 📞 *संपर्क:* +${ticket.data.phone}
 📞 *Alt:* ${ticket.data.altContact || 'N/A'}
 🕐 *वेळ:* ${ticket.data.incidentTime}
-📅 *भेटीची वेळ:* ${date} at ${time}
 
 _काम झाल्यावर *ticket* टाइप करा._`);
 
     // Notify citizen in their language
     const citizenMsg = ticket.lang === 'mr'
-      ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*\n🎫 Ticket: ${ref}\n\n👤 *अधिकारी:* ${driver.name}\n📅 *भेटीची तारीख:* ${date}\n⏰ *वेळ:* ${time}\n\n_ते येण्यापूर्वी फोन करतील._`
-      : `👷 *Your complaint has been assigned to an officer!*\n🎫 Ticket: ${ref}\n\n👤 *Officer:* ${driver.name}\n📅 *Visit Date:* ${date}\n⏰ *Time:* ${time}\n\n_He will call before arriving._`;
+      ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*\n🎫 Ticket: ${ref}\n\n👤 *अधिकारी:* ${driver.name}\n\n_ते येण्यापूर्वी फोन करतील._`
+      : `👷 *Your complaint has been assigned to an officer!*\n🎫 Ticket: ${ref}\n\n👤 *Officer:* ${driver.name}\n\n_He will call before arriving._`;
     await sendWA(ticket.citizenPhone, citizenMsg);
 
     // Update Airtable with driver assignment
@@ -197,13 +214,11 @@ _काम झाल्यावर *ticket* टाइप करा._`);
             fldgb6Ftq7qaRNoHe: 'Assigned',
             fldQ85dcRt82zeQGJ: driver.name,
             fldTA01ZKdnd1Xwwq: driver.phone,
-            fldVKY91f2G8MTQCl: date,
-            flddjxXOCvz9etiPr: time,
           }})
         });
       } catch(e) { console.error('[atAssign error]', e.message); }
     }
-    await sendWA(from, `✅ *${ref}* → *${driver.name}*\n📅 ${date} ⏰ ${time}\nCitizen ✓  Driver ✓`);
+    await sendWA(from, `✅ *${ref}* → *${driver.name}*\nCitizen ✓  Driver ✓`);
     return;
   }
 
@@ -248,13 +263,29 @@ _काम झाल्यावर *ticket* टाइप करा._`);
   if (refOnly) {
     const ref = refOnly[1].toUpperCase();
     const ticket = tickets[ref];
-    if (!ticket) { await sendWA(from, `⚠️ Ticket \`${ref}\` not found.`); return; }
-    pendingAssign[from] = { ref, date: 'TBD', time: 'TBD' };
+    if (!ticket) { 
+      await sendWA(from, `⚠️ Ticket \`${ref}\` not found in memory.\nBot restart झाले असेल — complaint again file करावी लागेल.`); 
+      return; 
+    }
+    pendingAssign[from] = { ref };
+    // Save to Airtable so it survives restart
+    try {
+      await fetch(`https://api.airtable.com/v0/appIAa5QyApMtzlR8/tblWDeHIP7VMEgqo1`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.AIRTABLE_API_KEY}` },
+        body: JSON.stringify({ fields: { 
+          fldqtgQkeRJVmnyPi: `PENDING_${from}`,
+          fldThfAgPohMINbnH: ref,
+          fldBakW5veuT3uf2b: nowIST()
+        }})
+      });
+    } catch(e) {}
     await sendWA(from,
 `📋 *Ticket:* ${ref}
 🐕 ${ticket.data.incidentLabel}
 👤 ${ticket.data.name}
 📍 ${ticket.data.location}
+🕐 ${ticket.data.incidentTime}
 
 *Driver निवडा / Select driver:*
 1️⃣  Somnath Catcher
