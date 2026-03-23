@@ -534,69 +534,44 @@ Welcome to VVCMC Stray Dog Complaint Bot!
 }
 
 /* ── TOKEN AUTO REFRESH ── */
-async function refreshToken() {
-  try {
-    const res = await fetch(
-      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.META_APP_ID}&client_secret=${process.env.META_APP_SECRET}&fb_exchange_token=${process.env.WA_ACCESS_TOKEN}`,
-      { signal: AbortSignal.timeout(10000) }
-    );
-    const data = await res.json();
-    if (data.access_token) {
-      process.env.WA_ACCESS_TOKEN = data.access_token;
-      fetch(`${ST_URL}/${TOKEN_RECORD_ID}`, {
-        method: 'PATCH', headers: AT_HDR(),
-        body: JSON.stringify({ fields: { fldThfAgPohMINbnH: data.access_token, fldBakW5veuT3uf2b: nowIST() } })
-      }).catch(() => {});
-      console.log('✅ Token refreshed!');
-    }
-  } catch(e) { console.error('[refreshToken error]', e.message); }
-}
-
-/* ── FETCH WITH TIMEOUT ── */
-async function fetchWithTimeout(url, options, timeoutMs = 5000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(timeout);
-    return res;
-  } catch(e) {
-    clearTimeout(timeout);
-    throw e;
-  }
-}
-
-/* ── STARTUP ── */
+/* ── STARTUP — runs once when server starts ── */
 async function startup() {
-  console.log('✅ Bot starting...');
+  console.log('✅ VVCMC Bot starting...');
 
-  // Load token from Airtable with 5 second timeout
+  // Load token from Airtable (1 call only)
   try {
-    const r = await fetchWithTimeout(`${ST_URL}/${TOKEN_RECORD_ID}`, { headers: AT_HDR() }, 5000);
+    const r = await fetch(`${ST_URL}/${TOKEN_RECORD_ID}`, {
+      headers: AT_HDR(),
+      signal: AbortSignal.timeout(8000)
+    });
     const d = await r.json();
     const token = d.fields?.fldThfAgPohMINbnH;
     if (token && token.length > 50 && !token.includes('PASTE')) {
       process.env.WA_ACCESS_TOKEN = token;
       console.log('✅ Token loaded from Airtable!');
     }
-  } catch(e) { console.log('⚠️ Token load skipped (using env var):', e.message); }
+  } catch(e) { console.log('⚠️ Using env token:', e.message); }
 
-  // Load counter with 5 second timeout
+  // Load ticket counter from Airtable (1 call only)
   try {
-    const r = await fetchWithTimeout(`${ST_URL}/${COUNTER_RECORD_ID}`, { headers: AT_HDR() }, 5000);
+    const r = await fetch(`${ST_URL}/${COUNTER_RECORD_ID}`, {
+      headers: AT_HDR(),
+      signal: AbortSignal.timeout(8000)
+    });
     const d = await r.json();
     const val = parseInt(d.fields?.fldThfAgPohMINbnH);
     if (val && val > ticketCounter) {
       ticketCounter = val;
-      console.log(`✅ Counter loaded: ${ticketCounter}`);
+      console.log(`✅ Counter: ${ticketCounter}`);
     }
-  } catch(e) { console.log('⚠️ Counter load skipped:', e.message); }
+  } catch(e) { console.log('⚠️ Using default counter:', e.message); }
 
-  // Auto refresh every 45 days ONLY (not on every startup!)
-  setInterval(refreshToken, 45 * 24 * 60 * 60 * 1000);
-  console.log('✅ Bot ready to receive messages!');
+  console.log('✅ Bot ready!');
+  // NO token refresh on startup — token is managed manually via UPDATE-TOKEN command
 }
-setTimeout(startup, 1000);
+
+// Start after 2 seconds
+setTimeout(startup, 2000);
 
 /* ── HTTP SERVER ── */
 const PORT = process.env.PORT || 3000;
