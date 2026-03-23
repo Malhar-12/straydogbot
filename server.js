@@ -188,12 +188,27 @@ _काम झाल्यावर *ticket* टाइप करा._`);
       : `👷 *Your complaint has been assigned to an officer!*\n🎫 Ticket: ${ref}\n\n👤 *Officer:* ${driver.name}\n📅 *Visit Date:* ${date}\n⏰ *Time:* ${time}\n\n_He will call before arriving._`;
     await sendWA(ticket.citizenPhone, citizenMsg);
 
+    // Update Airtable with driver assignment
+    if (ticket.atRecordId) {
+      try {
+        await fetch(`${AT_URL}/${ticket.atRecordId}`, {
+          method: 'PATCH', headers: AT_HDR(),
+          body: JSON.stringify({ fields: {
+            fldgb6Ftq7qaRNoHe: 'Assigned',
+            fldQ85dcRt82zeQGJ: driver.name,
+            fldTA01ZKdnd1Xwwq: driver.phone,
+            fldVKY91f2G8MTQCl: date,
+            flddjxXOCvz9etiPr: time,
+          }})
+        });
+      } catch(e) { console.error('[atAssign error]', e.message); }
+    }
     await sendWA(from, `✅ *${ref}* → *${driver.name}*\n📅 ${date} ⏰ ${time}\nCitizen ✓  Driver ✓`);
     return;
   }
 
   // STEP 1 — Admin sends ASSIGN command
-  const m = text.match(/ASSIGN\s+(SDB-[A-Z0-9]+)\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
+  const m = text.match(/ASSIGN\s+((?:VVCMC-STRAY-[A-Z]+-\d+|SDB-[A-Z0-9]+))\s+DRIVER:(\d+)\s+DATE:([^\s]+)\s+TIME:([^\s]+)/i);
   if (m) {
     const [, ref, driverId, date, time] = m;
     const ticket = tickets[ref];
@@ -229,7 +244,7 @@ _काम झाल्यावर *ticket* टाइप करा._`);
   }
 
   // STEP 1B — Admin sends just ticket ref to start selection
-  const refOnly = text.match(/^(SDB-[A-Z0-9]+)$/i);
+  const refOnly = text.match(/^(VVCMC-STRAY-[A-Z]+-\d+|SDB-[A-Z0-9]+)$/i);
   if (refOnly) {
     const ref = refOnly[1].toUpperCase();
     const ticket = tickets[ref];
