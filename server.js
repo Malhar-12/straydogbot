@@ -349,14 +349,11 @@ _Reply with 1 or 2_`);
 
 async function showOpenTickets(from) {
   try {
-    const r = await fetch(`${AT_URL}?fields[]=fldi3QMTASyf3FiH8&fields[]=fldNfZJ9MB5Ub7o0S&fields[]=fld8dumoEH3eCv8bg&fields[]=fldE45zv9IER93A8Q&fields[]=fldgb6Ftq7qaRNoHe&fields[]=fld1VlQL5WwOptowZ&sort[0][field]=fldi3QMTASyf3FiH8&sort[0][direction]=desc`, {
+    const r = await fetch(`${AT_URL}?filterByFormula=${encodeURIComponent("{fldgb6Ftq7qaRNoHe}='Open'")}&fields[]=fldi3QMTASyf3FiH8&fields[]=fldNfZJ9MB5Ub7o0S&fields[]=fld8dumoEH3eCv8bg&fields[]=fldE45zv9IER93A8Q&fields[]=fldgb6Ftq7qaRNoHe&fields[]=fld1VlQL5WwOptowZ&sort[0][field]=fldi3QMTASyf3FiH8&sort[0][direction]=desc`, {
       headers: AT_HDR()
     });
     const d = await r.json();
-    const open = d.records?.filter(rec => {
-      const status = rec.fields?.fldgb6Ftq7qaRNoHe?.name || rec.fields?.fldgb6Ftq7qaRNoHe;
-      return status === 'Open';
-    }) || [];
+    const open = d.records || [];
 
     if (open.length === 0) {
       await sendWA(from, `📋 *Admin Panel — VVCMC Bot*\n\n✅ सध्या कोणतीही Open तक्रार नाही!\n(No open tickets right now!)`);
