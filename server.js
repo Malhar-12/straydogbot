@@ -589,12 +589,11 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     }
     const mType = msgObj.image ? 'image' : 'video';
     const mId   = msgObj.image?.id || msgObj.video?.id;
-    const mUrl  = await getMediaUrl(mId);
+
+    // Run getMediaUrl and getNextTicketNumber in PARALLEL — faster!
+    const [mUrl, ref] = await Promise.all([getMediaUrl(mId), getNextTicketNumber()]);
     s.data.mediaUrl = mUrl; s.data.mediaId = mId; s.data.mediaType = mType;
     s.data.lang = s.lang;
-
-    // Get ticket number first (needed for messages)
-    const ref = await getNextTicketNumber();
     s.step = 'done'; s.ref = ref;
 
     // Send citizen confirmation IMMEDIATELY — don't wait for Airtable
