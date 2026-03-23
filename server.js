@@ -123,13 +123,8 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
 let ticketCounter = 10; // safe default, will be updated from Airtable
 
 async function loadCounter() {
-  try {
-    const r = await fetch(`${ST_URL}/${COUNTER_RECORD_ID}`, { headers: AT_HDR() });
-    const d = await r.json();
-    const val = parseInt(d.fields?.fldThfAgPohMINbnH);
-    if (val && val > ticketCounter) { ticketCounter = val; }
-    console.log(`✅ Counter loaded: ${ticketCounter}`);
-  } catch(e) { console.error('[loadCounter error]', e.message); }
+  // Counter is loaded in startup() with timeout
+  // This function kept for compatibility
 }
 
 async function saveCounter(val) {
@@ -290,7 +285,9 @@ ${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`);
   openTickets.forEach((t, i) => {
     msg += `${i+1}. *${t.ref}*\n   🐕 ${t.data.incidentLabel}\n   👤 ${t.data.name}\n   📍 ${t.data.location.slice(0,40)}\n   🕐 ${t.data.incidentTime}\n\n`;
   });
-  msg += `_Ticket ref पाठवा to assign_`;
+  msg += `━━━━━━━━━━
+👆 *वरील ticket ref copy करा आणि इथे paste करा!*
+Example: \`${openTickets[0]?.ref || 'VVCMC-STRAY-MAR-00010'}\``;
   await sendWA(from, msg);
 }
 
@@ -487,7 +484,7 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     const mId   = msgObj.image?.id || msgObj.video?.id;
     s.data.mediaId = mId; s.data.mediaType = mType;
 
-    // Generate ticket ref IMMEDIATELY — no Airtable call needed
+    // Generate ticket ref IMMEDIATELY
     const ref = genRef();
     const t = {
       ref, status: 'Open', lang: s.lang,
@@ -506,16 +503,20 @@ Welcome to VVCMC Stray Dog Complaint Bot!
       ? `🚨 *नवीन तक्रार — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *तक्रार:* ${s.data.incidentLabel}\n👤 *नाव:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *ठिकाण:* ${s.data.location}\n📞 *Alt:* ${s.data.altContact || 'N/A'}\n🕐 *वेळ:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref:_\n*${ref}*`
       : `🚨 *New Complaint — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *Issue:* ${s.data.incidentLabel}\n👤 *Name:* ${s.data.name}\n📱 *Phone:* +${from}\n📍 *Location:* ${s.data.location}\n📞 *Alt Contact:* ${s.data.altContact || 'N/A'}\n🕐 *Time:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket ref:_\n*${ref}*`;
 
-    // Send messages and save to Airtable IN PARALLEL
-    const mUrl = await getMediaUrl(mId);
-    t.data.mediaUrl = mUrl;
-
+    // STEP 1: Send citizen confirmation and admin alert IMMEDIATELY (no waiting!)
     await Promise.all([
       sendWA(from, citizenConfirm),
       sendWA(GS_NUMBER, adminAlert),
-      mId ? forwardMedia(GS_NUMBER, mId, mType, s.lang === 'mr' ? `📸 पुरावा — ${ref}` : `📸 Evidence — ${ref}`) : Promise.resolve(),
-      atCreate(ref, { ...s.data, mediaUrl: mUrl }).then(atId => { if (atId) t.atRecordId = atId; }),
     ]);
+
+    // STEP 2: Do media + Airtable IN BACKGROUND (don't make citizen wait!)
+    Promise.all([
+      mId ? forwardMedia(GS_NUMBER, mId, mType, s.lang === 'mr' ? `📸 पुरावा — ${ref}` : `📸 Evidence — ${ref}`) : Promise.resolve(),
+      getMediaUrl(mId).then(mUrl => {
+        t.data.mediaUrl = mUrl;
+        return atCreate(ref, { ...s.data, mediaUrl: mUrl }).then(atId => { if (atId) t.atRecordId = atId; });
+      }),
+    ]).catch(e => console.error('[background error]', e.message));
     return;
   }
 
@@ -537,7 +538,8 @@ Welcome to VVCMC Stray Dog Complaint Bot!
 async function refreshToken() {
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.META_APP_ID}&client_secret=${process.env.META_APP_SECRET}&fb_exchange_token=${process.env.WA_ACCESS_TOKEN}`
+      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.META_APP_ID}&client_secret=${process.env.META_APP_SECRET}&fb_exchange_token=${process.env.WA_ACCESS_TOKEN}`,
+      { signal: AbortSignal.timeout(10000) }
     );
     const data = await res.json();
     if (data.access_token) {
@@ -551,30 +553,51 @@ async function refreshToken() {
   } catch(e) { console.error('[refreshToken error]', e.message); }
 }
 
+/* ── FETCH WITH TIMEOUT ── */
+async function fetchWithTimeout(url, options, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timeout);
+    return res;
+  } catch(e) {
+    clearTimeout(timeout);
+    throw e;
+  }
+}
+
 /* ── STARTUP ── */
 async function startup() {
-  // Load token from Airtable (only 1 call on startup)
+  console.log('✅ Bot starting...');
+
+  // Load token from Airtable with 5 second timeout
   try {
-    const r = await fetch(`${ST_URL}/${TOKEN_RECORD_ID}`, { headers: AT_HDR() });
+    const r = await fetchWithTimeout(`${ST_URL}/${TOKEN_RECORD_ID}`, { headers: AT_HDR() }, 5000);
     const d = await r.json();
     const token = d.fields?.fldThfAgPohMINbnH;
     if (token && token.length > 50 && !token.includes('PASTE')) {
       process.env.WA_ACCESS_TOKEN = token;
       console.log('✅ Token loaded from Airtable!');
     }
-  } catch(e) { console.error('[loadToken error]', e.message); }
+  } catch(e) { console.log('⚠️ Token load skipped (using env var):', e.message); }
 
-  // Load counter (only 1 call on startup)
-  await loadCounter();
+  // Load counter with 5 second timeout
+  try {
+    const r = await fetchWithTimeout(`${ST_URL}/${COUNTER_RECORD_ID}`, { headers: AT_HDR() }, 5000);
+    const d = await r.json();
+    const val = parseInt(d.fields?.fldThfAgPohMINbnH);
+    if (val && val > ticketCounter) {
+      ticketCounter = val;
+      console.log(`✅ Counter loaded: ${ticketCounter}`);
+    }
+  } catch(e) { console.log('⚠️ Counter load skipped:', e.message); }
 
-  // Refresh token
-  await refreshToken();
-
-  // Auto refresh every 45 days
+  // Auto refresh every 45 days ONLY (not on every startup!)
   setInterval(refreshToken, 45 * 24 * 60 * 60 * 1000);
-  console.log('✅ Bot ready!');
+  console.log('✅ Bot ready to receive messages!');
 }
-setTimeout(startup, 2000);
+setTimeout(startup, 1000);
 
 /* ── HTTP SERVER ── */
 const PORT = process.env.PORT || 3000;
