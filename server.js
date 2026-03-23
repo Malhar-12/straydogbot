@@ -1,6 +1,8 @@
 'use strict';
 
 const GS_NUMBER = '919820349477';
+const DEV_NUMBER = '917219373694';  // Developer — can update token via WhatsApp
+const DEV_NUMBER = '917219373694';  // Developer number — only this can update token
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
@@ -131,8 +133,26 @@ function parseLocation(text) {
   return null;
 }
 
+/* ── AUTHORIZED NUMBERS — can update token via WhatsApp ── */
+const AUTHORIZED_NUMBERS = ['919820349477', '919890044455', '917219373694'];
+
 /* ── GS / ADMIN HANDLER ── */
 async function handleAdmin(from, text) {
+
+  // TOKEN UPDATE COMMAND — any authorized number can update token
+  // Send: UPDATE-TOKEN:yourNewTokenHere
+  if (text.startsWith('UPDATE-TOKEN:')) {
+    const newToken = text.replace('UPDATE-TOKEN:', '').trim();
+    if (newToken.length > 50) {
+      process.env.WA_ACCESS_TOKEN = newToken;
+      await saveTokenToAirtable(newToken);
+      await sendWA(from, '✅ Token updated successfully! Bot will now work properly.');
+      console.log('✅ Token updated via WhatsApp command!');
+    } else {
+      await sendWA(from, '⚠️ Invalid token. Please send: UPDATE-TOKEN:yourNewTokenHere');
+    }
+    return;
+  }
 
   // STEP 2 — Admin selected a driver number (1 or 2)
   if (pendingAssign[from] && /^[12]$/.test(text)) {
@@ -521,7 +541,20 @@ require('http').createServer(async (req, res) => {
         if (!msgObj) return;
         const from   = msgObj.from;
         const driver = DRIVERS.find(d => d.phone === from);
-        if      (from === GS_NUMBER) await handleAdmin(from, (msgObj.text?.body || '').trim());
+        // Developer token update command
+        if (from === DEV_NUMBER && (msgObj.text?.body || '').startsWith('UPDATE-TOKEN:')) {
+          const newToken = (msgObj.text?.body || '').replace('UPDATE-TOKEN:', '').trim();
+          if (newToken.length > 50) {
+            process.env.WA_ACCESS_TOKEN = newToken;
+            await saveTokenToAirtable(newToken);
+            await sendWA(DEV_NUMBER, '✅ Token updated successfully! Bot will now use new token.');
+            console.log('✅ Token updated via WhatsApp command!');
+          } else {
+            await sendWA(DEV_NUMBER, '⚠️ Invalid token! Make sure to send: UPDATE-TOKEN:your_full_token_here');
+          }
+          return;
+        }
+        if (from === GS_NUMBER || AUTHORIZED_NUMBERS.includes(from)) await handleAdmin(from, (msgObj.text?.body || '').trim());
         else if (driver)             await handleDriver(from, msgObj, driver);
         else                         await handleCitizen(from, msgObj);
       } catch (err) { console.error('[handler error]', err.message); }
