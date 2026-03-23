@@ -2,7 +2,6 @@
 
 const GS_NUMBER = '919820349477';
 const DEV_NUMBER = '917219373694';  // Developer — can update token via WhatsApp
-const DEV_NUMBER = '917219373694';  // Developer number — only this can update token
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
