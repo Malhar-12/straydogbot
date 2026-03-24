@@ -8,9 +8,10 @@ const DRIVERS = [
 ];
 
 /* ── IN-MEMORY STORES (fast, no API delay) ── */
-const sessions     = {}; // citizen conversation state
-const tickets      = {}; // all tickets in memory
+const sessions      = {}; // citizen conversation state
+const tickets       = {}; // all tickets in memory
 const pendingAssign = {}; // admin pending driver selection
+const processed     = new Set(); // deduplication - prevent duplicate messages
 
 function getSession(from) {
   if (!sessions[from]) sessions[from] = { step: 'greet', lang: null, data: {} };
@@ -297,6 +298,14 @@ async function handleDriver(from, msgObj, driver) {
   const isPin    = msgObj.type === 'location';
   const s        = getSession(from);
 
+  // Always reset to idle if driver sends ticket or hi
+  if (/^(hi|hello|हाय|नमस्कार)$/i.test(text)) {
+    s.step = 'driver_idle';
+    await sendWA(from, `👋 नमस्कार ${driver.name}!
+तुमचे tickets पाहण्यासाठी *ticket* टाइप करा.`);
+    return;
+  }
+
   if (/^ticket$/i.test(text)) {
     const mine = Object.values(tickets).filter(t => t.status === 'Assigned' && t.driverName === driver.name);
     if (!mine.length) {
@@ -409,6 +418,9 @@ Welcome to VVCMC Stray Dog Complaint Bot!
 2️⃣  English`);
     return;
   }
+
+  // If citizen sends photo/message without Hi and step is greet - ignore silently
+  // This prevents random messages triggering the welcome flow
 
   if (s.step === 'lang') {
     if      (text === '1' || /marathi|मराठी/i.test(text)) s.lang = 'mr';
@@ -607,6 +619,19 @@ require('http').createServer(async (req, res) => {
         const data   = JSON.parse(body);
         const msgObj = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
         if (!msgObj) return;
+
+        // Deduplication — ignore duplicate webhook events
+        const msgId = msgObj.id;
+        if (msgId) {
+          if (processed.has(msgId)) {
+            console.log('⚠️ Duplicate message ignored:', msgId);
+            return;
+          }
+          processed.add(msgId);
+          // Clean up old IDs after 10 mins to prevent memory leak
+          setTimeout(() => processed.delete(msgId), 10 * 60 * 1000);
+        }
+
         const from   = msgObj.from;
         const driver = DRIVERS.find(d => d.phone === from);
         const isAdmin = from === GS_NUMBER;
