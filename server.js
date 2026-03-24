@@ -585,6 +585,13 @@ async function startup() {
 // Start after 2 seconds
 setTimeout(startup, 2000);
 
+// Self-ping every 10 minutes to prevent Render from sleeping
+setInterval(() => {
+  fetch('https://straydogbot.onrender.com')
+    .then(() => console.log('✅ Self-ping OK'))
+    .catch(() => {}); // ignore errors
+}, 10 * 60 * 1000);
+
 /* ── HTTP SERVER ── */
 const PORT = process.env.PORT || 3000;
 require('http').createServer(async (req, res) => {
