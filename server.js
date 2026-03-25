@@ -120,8 +120,7 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
 }
 
 /* ── TICKET COUNTER — read once on startup, then keep in memory ── */
-let ticketCounter = 0; // always loaded from Airtable on startup
-let counterLoaded = false; // flag to check if counter is loaded
+let ticketCounter = 12; // fallback - always overridden by Airtable
 
 async function saveCounter(val) {
   try {
@@ -132,26 +131,13 @@ async function saveCounter(val) {
   } catch(e) { console.error('[saveCounter error]', e.message); }
 }
 
-async function genRef() {
-  // If counter not loaded yet, load from Airtable first
-  if (!counterLoaded) {
-    try {
-      const r = await fetch(`${ST_URL}/${COUNTER_RECORD_ID}`, {
-        headers: AT_HDR(), signal: AbortSignal.timeout(8000)
-      });
-      const d = await r.json();
-      const val = parseInt(d.fields?.fldThfAgPohMINbnH);
-      if (val && val > 0) { ticketCounter = val; }
-      counterLoaded = true;
-      console.log(`✅ Counter loaded on demand: ${ticketCounter}`);
-    } catch(e) { console.error('[genRef loadCounter error]', e.message); }
-  }
+function genRef() {
   const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   const month = months[new Date().getMonth()];
   const num = String(ticketCounter).padStart(5, '0');
   const ref = `VVCMC-STRAY-${month}-${num}`;
   ticketCounter++;
-  saveCounter(ticketCounter).catch(() => {}); // save async
+  saveCounter(ticketCounter).catch(() => {}); // save async, don't wait
   return ref;
 }
 
@@ -504,8 +490,8 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     const mId   = msgObj.image?.id || msgObj.video?.id;
     s.data.mediaId = mId; s.data.mediaType = mType;
 
-    // Generate ticket ref — loads from Airtable if needed
-    const ref = await genRef();
+    // Generate ticket ref
+    const ref = genRef();
     const t = {
       ref, status: 'Open', lang: s.lang,
       citizenPhone: from, atRecordId: null,
@@ -581,9 +567,11 @@ async function startup() {
     });
     const d = await r.json();
     const val = parseInt(d.fields?.fldThfAgPohMINbnH);
-    if (val && val > ticketCounter) {
-      ticketCounter = val;
+    if (val && val > 0) {
+      ticketCounter = val; // always use Airtable value
       console.log(`✅ Counter: ${ticketCounter}`);
+    } else {
+      console.log(`⚠️ Counter not found in Airtable, using default: ${ticketCounter}`);
     }
   } catch(e) { console.log('⚠️ Using default counter:', e.message); }
 
