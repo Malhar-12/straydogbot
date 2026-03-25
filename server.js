@@ -120,7 +120,8 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
 }
 
 /* ── TICKET COUNTER — read once on startup, then keep in memory ── */
-let ticketCounter = 12; // fallback - always overridden by Airtable
+let ticketCounter = 13; // fallback default — always updated from Airtable on startup
+let counterReady = false; // true only after Airtable confirms the value
 
 async function saveCounter(val) {
   try {
@@ -131,13 +132,31 @@ async function saveCounter(val) {
   } catch(e) { console.error('[saveCounter error]', e.message); }
 }
 
-function genRef() {
+async function genRef() {
+  // Wait for counter to be loaded from Airtable if not ready
+  if (!counterReady) {
+    try {
+      const r = await fetch(`${ST_URL}/${COUNTER_RECORD_ID}`, {
+        headers: AT_HDR(), signal: AbortSignal.timeout(8000)
+      });
+      const d = await r.json();
+      const val = parseInt(d.fields?.fldThfAgPohMINbnH);
+      if (val && val > 0) {
+        ticketCounter = val;
+        console.log(`✅ Counter ready: ${ticketCounter}`);
+      }
+      counterReady = true;
+    } catch(e) {
+      console.error('[genRef counter load error]', e.message);
+      counterReady = true; // use fallback
+    }
+  }
   const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   const month = months[new Date().getMonth()];
   const num = String(ticketCounter).padStart(5, '0');
   const ref = `VVCMC-STRAY-${month}-${num}`;
   ticketCounter++;
-  saveCounter(ticketCounter).catch(() => {}); // save async, don't wait
+  saveCounter(ticketCounter).catch(() => {}); // save async
   return ref;
 }
 
@@ -490,8 +509,8 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     const mId   = msgObj.image?.id || msgObj.video?.id;
     s.data.mediaId = mId; s.data.mediaType = mType;
 
-    // Generate ticket ref
-    const ref = genRef();
+    // Generate ticket ref — waits for counter from Airtable
+    const ref = await genRef();
     const t = {
       ref, status: 'Open', lang: s.lang,
       citizenPhone: from, atRecordId: null,
@@ -569,11 +588,53 @@ async function startup() {
     const val = parseInt(d.fields?.fldThfAgPohMINbnH);
     if (val && val > 0) {
       ticketCounter = val; // always use Airtable value
+      counterReady = true; // mark as loaded
       console.log(`✅ Counter: ${ticketCounter}`);
     } else {
       console.log(`⚠️ Counter not found in Airtable, using default: ${ticketCounter}`);
     }
   } catch(e) { console.log('⚠️ Using default counter:', e.message); }
+
+  // Load open tickets from Airtable into memory
+  try {
+    const r = await fetch(`${AT_URL}?fields[]=fldi3QMTASyf3FiH8&fields[]=fldgb6Ftq7qaRNoHe&fields[]=fldNfZJ9MB5Ub7o0S&fields[]=fld8dumoEH3eCv8bg&fields[]=fld9mitPsPU8y32PW&fields[]=fldE45zv9IER93A8Q&fields[]=fldhrqYI58ioDB6xH&fields[]=fld5idjsIpkMglZMV&fields[]=flddMQC528gDuo0AI&fields[]=fldQmRhTECXhx75EX&fields[]=fldQ85dcRt82zeQGJ`, {
+      headers: AT_HDR(),
+      signal: AbortSignal.timeout(10000)
+    });
+    const d = await r.json();
+    if (d.records) {
+      let loaded = 0;
+      d.records.forEach(rec => {
+        const f = rec.fields;
+        const status = f.fldgb6Ftq7qaRNoHe?.name || f.fldgb6Ftq7qaRNoHe;
+        if (status === 'Open' || status === 'Assigned') {
+          const ref = f.fldi3QMTASyf3FiH8;
+          if (ref && ref.startsWith('VVCMC-STRAY-')) {
+            tickets[ref] = {
+              ref,
+              status: status,
+              lang: f.fldQmRhTECXhx75EX === 'मराठी' ? 'mr' : 'en',
+              citizenPhone: f.fld9mitPsPU8y32PW || '',
+              driverName: f.fldQ85dcRt82zeQGJ || '',
+              atRecordId: rec.id,
+              data: {
+                incidentLabel: f.fldNfZJ9MB5Ub7o0S || '',
+                name: f.fld8dumoEH3eCv8bg || '',
+                phone: f.fld9mitPsPU8y32PW || '',
+                location: f.fldE45zv9IER93A8Q || '',
+                altContact: f.fldhrqYI58ioDB6xH || '',
+                mediaType: f.fld5idjsIpkMglZMV || '',
+                mediaUrl: f.flddMQC528gDuo0AI || '',
+                incidentTime: '',
+              }
+            };
+            loaded++;
+          }
+        }
+      });
+      console.log(`✅ Loaded ${loaded} open tickets from Airtable!`);
+    }
+  } catch(e) { console.log('⚠️ Could not load tickets:', e.message); }
 
   console.log('✅ Bot ready!');
   // NO token refresh on startup — token is managed manually via UPDATE-TOKEN command
