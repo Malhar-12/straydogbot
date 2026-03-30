@@ -1,24 +1,21 @@
 'use strict';
 
-/* ── CONFIG ── */
 const GS_NUMBER  = '919820349477';
 const DRIVERS = [
   { id: 1, name: 'Somnath Catcher', phone: '917218082442' },
   { id: 2, name: 'Mukesh Catcher',  phone: '919373246128' },
 ];
 
-/* ── IN-MEMORY STORES (fast, no API delay) ── */
-const sessions      = {}; // citizen conversation state
-const tickets       = {}; // all tickets in memory
-const pendingAssign = {}; // admin pending driver selection
-const processed     = new Set(); // deduplication - prevent duplicate messages
+const sessions      = {}; 
+const tickets       = {}; 
+const pendingAssign = {}; 
+const processed     = new Set(); 
 
 function getSession(from) {
   if (!sessions[from]) sessions[from] = { step: 'greet', lang: null, data: {} };
   return sessions[from];
 }
 
-/* ── TIME ── */
 function nowIST() {
   return new Date().toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -27,7 +24,6 @@ function nowIST() {
   });
 }
 
-/* ── WHATSAPP ── */
 async function sendWA(to, body) {
   if (!to || to.includes('X')) return;
   const res = await fetch(`https://graph.facebook.com/v19.0/${process.env.WA_PHONE_NUMBER_ID}/messages`, {
@@ -56,7 +52,6 @@ async function getMediaUrl(mediaId) {
   } catch { return ''; }
 }
 
-/* ── AIRTABLE (only for saving data — not for reading!) ── */
 const AT_BASE = 'appIAa5QyApMtzlR8';
 const AT_TABLE = 'tblLhgEATdVGkWhGo';
 const AT_SETTINGS = 'tblWDeHIP7VMEgqo1';
@@ -119,9 +114,8 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
   } catch (e) { console.error('[atClose exception]', e.message); }
 }
 
-/* ── TICKET COUNTER — read once on startup, then keep in memory ── */
-let ticketCounter = 13; // fallback default — always updated from Airtable on startup
-let counterReady = false; // true only after Airtable confirms the value
+let ticketCounter = 13; 
+let counterReady = false; 
 
 async function saveCounter(val) {
   try {
@@ -133,7 +127,7 @@ async function saveCounter(val) {
 }
 
 async function genRef() {
-  // Wait for counter to be loaded from Airtable if not ready
+  
   if (!counterReady) {
     try {
       const r = await fetch(`${ST_URL}/${COUNTER_RECORD_ID}`, {
@@ -148,7 +142,7 @@ async function genRef() {
       counterReady = true;
     } catch(e) {
       console.error('[genRef counter load error]', e.message);
-      counterReady = true; // use fallback
+      counterReady = true; 
     }
   }
   const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
@@ -156,11 +150,10 @@ async function genRef() {
   const num = String(ticketCounter).padStart(5, '0');
   const ref = `VVCMC-STRAY-${month}-${num}`;
   ticketCounter++;
-  saveCounter(ticketCounter).catch(() => {}); // save async
+  saveCounter(ticketCounter).catch(() => {}); 
   return ref;
 }
 
-/* ── INCIDENT TYPES ── */
 const INCIDENT = {
   mr: {
     '1': 'श्वानांचा उपद्रव',
@@ -184,15 +177,14 @@ function parseLocation(text) {
   return null;
 }
 
-/* ── ADMIN HANDLER ── */
 async function handleAdmin(from, text) {
 
-  // TOKEN UPDATE
+  
   if (text.startsWith('UPDATE-TOKEN:')) {
     const newToken = text.replace('UPDATE-TOKEN:', '').trim();
     if (newToken.length > 50) {
       process.env.WA_ACCESS_TOKEN = newToken;
-      // Save to Airtable async
+      
       fetch(`${ST_URL}/${TOKEN_RECORD_ID}`, {
         method: 'PATCH', headers: AT_HDR(),
         body: JSON.stringify({ fields: { fldThfAgPohMINbnH: newToken, fldBakW5veuT3uf2b: nowIST() } })
@@ -204,24 +196,29 @@ async function handleAdmin(from, text) {
     return;
   }
 
-  // STEP 2 — Driver selection (1 or 2)
+  
   if (/^[12]$/.test(text) && pendingAssign[from]) {
     const { ref } = pendingAssign[from];
     const ticket = tickets[ref];
 
     if (!ticket) {
-      await sendWA(from, `⚠️ Ticket \`${ref}\` not found in memory.\nBot restart झाले असेल. कृपया ticket ref परत पाठवा.`);
+      await sendWA(from, `⚠️ Ticket \`${ref}\` memory मध्ये सापडले नाही.\nकृपया ticket ref परत पाठवा.`);
       delete pendingAssign[from];
       return;
     }
 
-    const driver = DRIVERS.find(d => d.id === parseInt(text));
+    const driverNum = parseInt(text);
+    const driver = DRIVERS.find(d => d.id === driverNum);
+    if (!driver) {
+      await sendWA(from, `⚠️ Invalid! Reply *1* for Somnath or *2* for Mukesh.`);
+      return;
+    }
     delete pendingAssign[from];
 
     ticket.status = 'Assigned';
     ticket.driverName = driver.name;
 
-    // Notify driver
+    
     await sendWA(driver.phone,
 `📋 *तुम्हाला काम सोपवले गेले आहे!*
 🎫 Ref: ${ref}
@@ -233,20 +230,20 @@ async function handleAdmin(from, text) {
 
 _काम झाल्यावर *ticket* टाइप करा._`);
 
-    // Notify citizen
+    
     const citizenMsg = ticket.lang === 'mr'
       ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*\n🎫 ${ref}\n👤 *अधिकारी:* ${driver.name}\n\n_ते येण्यापूर्वी फोन करतील._`
       : `👷 *Your complaint has been assigned!*\n🎫 ${ref}\n👤 *Officer:* ${driver.name}\n\n_He will call before arriving._`;
     await sendWA(ticket.citizenPhone, citizenMsg);
 
-    // Update Airtable async
+    
     if (ticket.atRecordId) atAssign(ticket.atRecordId, driver.name, driver.phone).catch(() => {});
 
     await sendWA(from, `✅ *${ref}* → *${driver.name}*\nCitizen ✓  Driver ✓  Airtable ✓`);
     return;
   }
 
-  // STEP 1 — Ticket ref received
+  
   const refMatch = text.match(/^(VVCMC-STRAY-[A-Z]+-\d+|SDB-[A-Z0-9]+)$/i);
   if (refMatch) {
     const ref = refMatch[1].toUpperCase();
@@ -254,14 +251,13 @@ _काम झाल्यावर *ticket* टाइप करा._`);
 
     if (!ticket) {
       await sendWA(from,
-`⚠️ Ticket \`${ref}\` memory मध्ये सापडले नाही.
-
-*कारण:* Bot restart झाल्यावर memory clear होते.
-
-*Solution:* Complainer ला पुन्हा *Hi* पाठवायला सांगा — नवीन complaint file होईल!`);
+`⚠️ Ticket \`${ref}\` सापडले नाही.
+Complainer ला पुन्हा *Hi* पाठवायला सांगा.`);
       return;
     }
 
+    
+    delete pendingAssign[from];
     pendingAssign[from] = { ref };
     await sendWA(from,
 `📋 *Ticket:* ${ref}
@@ -278,7 +274,7 @@ _Reply with 1 or 2_`);
     return;
   }
 
-  // Default — show open tickets from memory
+  
   const openTickets = Object.values(tickets).filter(t => t.status === 'Open');
 
   if (openTickets.length === 0) {
@@ -305,14 +301,13 @@ Example: \`${openTickets[0]?.ref || 'VVCMC-STRAY-MAR-00010'}\``;
   await sendWA(from, msg);
 }
 
-/* ── DRIVER HANDLER ── */
 async function handleDriver(from, msgObj, driver) {
   const text     = (msgObj.text?.body || '').trim();
   const hasMedia = !!(msgObj.image || msgObj.video);
   const isPin    = msgObj.type === 'location';
   const s        = getSession(from);
 
-  // Always reset to idle if driver sends ticket or hi
+  
   if (/^(hi|hello|हाय|नमस्कार)$/i.test(text)) {
     s.step = 'driver_idle';
     await sendWA(from, `👋 नमस्कार ${driver.name}!
@@ -378,12 +373,12 @@ Case बंद करण्यासाठी:
 
     ticket.status = 'Closed';
 
-    // Citizen closing message
+    
     const citizenClose = ticket.lang === 'mr'
       ? `✅ *तुमची तक्रार सोडवली गेली आहे!*\n\n🎫 Ticket: ${ref}\n🐕 ${ticket.data.incidentLabel}\n👷 *अधिकारी:* ${driver.name}\n📍 *ठिकाण:* ${loc}\n🕐 *बंद:* ${closedAt}\n\nआमच्या टीमने समस्या सोडवली.\n_VVCMC सेवेत विश्वास ठेवल्याबद्दल धन्यवाद! 🙏_\n\nनवीन तक्रारीसाठी *Hi* पाठवा.`
       : `✅ *Your complaint has been resolved!*\n\n🎫 Ticket: ${ref}\n🐕 ${ticket.data.incidentLabel}\n👷 *Officer:* ${driver.name}\n📍 *Resolved at:* ${loc}\n🕐 *Closed at:* ${closedAt}\n\nOur team has addressed the problem.\n_Thank you for reporting to VVCMC! 🙏_\n\nSend *Hi* to file a new complaint.`;
 
-    // Run in parallel for speed
+    
     await Promise.all([
       sendWA(ticket.citizenPhone, citizenClose),
       sendWA(GS_NUMBER, `✅ *Case Closed*\n🎫 ${ref}\n👷 ${driver.name}\n📍 ${loc}\n🕐 ${closedAt}\n👤 ${ticket.data.name}`),
@@ -410,7 +405,6 @@ _पुढील ticket साठी *ticket* टाइप करा._`);
   await sendWA(from, `👋 नमस्कार ${driver.name}!\nतुमचे tickets पाहण्यासाठी *ticket* टाइप करा.`);
 }
 
-/* ── CITIZEN HANDLER ── */
 async function handleCitizen(from, msgObj) {
   const text     = (msgObj.text?.body || '').trim();
   const hasMedia = !!(msgObj.image || msgObj.video);
@@ -433,8 +427,8 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     return;
   }
 
-  // If citizen sends photo/message without Hi and step is greet - ignore silently
-  // This prevents random messages triggering the welcome flow
+  
+  
 
   if (s.step === 'lang') {
     if      (text === '1' || /marathi|मराठी/i.test(text)) s.lang = 'mr';
@@ -509,7 +503,7 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     const mId   = msgObj.image?.id || msgObj.video?.id;
     s.data.mediaId = mId; s.data.mediaType = mType;
 
-    // Generate ticket ref — waits for counter from Airtable
+    
     const ref = await genRef();
     const t = {
       ref, status: 'Open', lang: s.lang,
@@ -519,7 +513,7 @@ Welcome to VVCMC Stray Dog Complaint Bot!
     tickets[ref] = t;
     s.step = 'done'; s.ref = ref;
 
-    // Build messages
+    
     const citizenConfirm = s.lang === 'mr'
       ? `✅ *तुमची तक्रार नोंदवली गेली!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *तक्रार:* ${s.data.incidentLabel}\n📍 *ठिकाण:* ${s.data.location}\n🕐 *वेळ:* ${s.data.incidentTime}\n\nआमचा अधिकारी लवकरच संपर्क करेल.\n*धन्यवाद! VVCMC 🙏*`
       : `✅ *Your complaint has been registered!*\n\n🎫 *Ticket:* \`${ref}\`\n🐕 *Issue:* ${s.data.incidentLabel}\n📍 *Location:* ${s.data.location}\n🕐 *Time:* ${s.data.incidentTime}\n\nOur officer will contact you shortly.\n*Thank you! VVCMC 🙏*`;
@@ -528,13 +522,13 @@ Welcome to VVCMC Stray Dog Complaint Bot!
       ? `🚨 *नवीन तक्रार — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *तक्रार:* ${s.data.incidentLabel}\n👤 *नाव:* ${s.data.name}\n📱 *तक्रारदार Phone:* +${from}\n📍 *ठिकाण:* ${s.data.location}\n📞 *Alt Contact:* ${s.data.altContact || 'N/A'}\n🕐 *वेळ:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Ticket number पाठवा to assign:_\n*${ref}*`
       : `🚨 *New Complaint — VVCMC Bot*\n\n🎫 *Ref:* ${ref}\n🐕 *Issue:* ${s.data.incidentLabel}\n👤 *Name:* ${s.data.name}\n📱 *Complainant Phone:* +${from}\n📍 *Location:* ${s.data.location}\n📞 *Alt Contact:* ${s.data.altContact || 'N/A'}\n🕐 *Time:* ${s.data.incidentTime}\n━━━━━━━━━━\n_Reply with ticket number to assign:_\n*${ref}*`;
 
-    // STEP 1: Send citizen confirmation and admin alert IMMEDIATELY (no waiting!)
+    
     await Promise.all([
       sendWA(from, citizenConfirm),
       sendWA(GS_NUMBER, adminAlert),
     ]);
 
-    // STEP 2: Do media + Airtable IN BACKGROUND (don't make citizen wait!)
+    
     Promise.all([
       mId ? forwardMedia(GS_NUMBER, mId, mType, s.lang === 'mr' ? `📸 पुरावा — ${ref}` : `📸 Evidence — ${ref}`) : Promise.resolve(),
       getMediaUrl(mId).then(mUrl => {
@@ -559,12 +553,10 @@ Welcome to VVCMC Stray Dog Complaint Bot!
   await sendWA(from, `👋 तक्रार नोंदवण्यासाठी *Hi* पाठवा.\n(Send *Hi* to start.)`);
 }
 
-/* ── TOKEN AUTO REFRESH ── */
-/* ── STARTUP — runs once when server starts ── */
 async function startup() {
   console.log('✅ VVCMC Bot starting...');
 
-  // Load token from Airtable (1 call only)
+  
   try {
     const r = await fetch(`${ST_URL}/${TOKEN_RECORD_ID}`, {
       headers: AT_HDR(),
@@ -578,7 +570,7 @@ async function startup() {
     }
   } catch(e) { console.log('⚠️ Using env token:', e.message); }
 
-  // Load ticket counter from Airtable (1 call only)
+  
   try {
     const r = await fetch(`${ST_URL}/${COUNTER_RECORD_ID}`, {
       headers: AT_HDR(),
@@ -587,15 +579,15 @@ async function startup() {
     const d = await r.json();
     const val = parseInt(d.fields?.fldThfAgPohMINbnH);
     if (val && val > 0) {
-      ticketCounter = val; // always use Airtable value
-      counterReady = true; // mark as loaded
+      ticketCounter = val; 
+      counterReady = true; 
       console.log(`✅ Counter: ${ticketCounter}`);
     } else {
       console.log(`⚠️ Counter not found in Airtable, using default: ${ticketCounter}`);
     }
   } catch(e) { console.log('⚠️ Using default counter:', e.message); }
 
-  // Load open tickets from Airtable into memory
+  
   try {
     const r = await fetch(`${AT_URL}?fields[]=fldi3QMTASyf3FiH8&fields[]=fldgb6Ftq7qaRNoHe&fields[]=fldNfZJ9MB5Ub7o0S&fields[]=fld8dumoEH3eCv8bg&fields[]=fld9mitPsPU8y32PW&fields[]=fldE45zv9IER93A8Q&fields[]=fldhrqYI58ioDB6xH&fields[]=fld5idjsIpkMglZMV&fields[]=flddMQC528gDuo0AI&fields[]=fldQmRhTECXhx75EX&fields[]=fldQ85dcRt82zeQGJ`, {
       headers: AT_HDR(),
@@ -637,20 +629,17 @@ async function startup() {
   } catch(e) { console.log('⚠️ Could not load tickets:', e.message); }
 
   console.log('✅ Bot ready!');
-  // NO token refresh on startup — token is managed manually via UPDATE-TOKEN command
+  
 }
 
-// Start after 2 seconds
 setTimeout(startup, 2000);
 
-// Self-ping every 10 minutes to prevent Render from sleeping
 setInterval(() => {
   fetch('https://straydogbot.onrender.com')
     .then(() => console.log('✅ Self-ping OK'))
-    .catch(() => {}); // ignore errors
+    .catch(() => {}); 
 }, 10 * 60 * 1000);
 
-/* ── HTTP SERVER ── */
 const PORT = process.env.PORT || 3000;
 require('http').createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost`);
@@ -685,7 +674,7 @@ require('http').createServer(async (req, res) => {
         const msgObj = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
         if (!msgObj) return;
 
-        // Deduplication — ignore duplicate webhook events
+        
         const msgId = msgObj.id;
         if (msgId) {
           if (processed.has(msgId)) {
@@ -693,7 +682,7 @@ require('http').createServer(async (req, res) => {
             return;
           }
           processed.add(msgId);
-          // Clean up old IDs after 10 mins to prevent memory leak
+          
           setTimeout(() => processed.delete(msgId), 10 * 60 * 1000);
         }
 
