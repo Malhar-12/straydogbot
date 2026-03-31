@@ -244,6 +244,31 @@ _काम झाल्यावर *ticket* टाइप करा._`);
   }
 
   
+  // Admin selects ticket by number from list (1, 2, 3...)
+  if (/^\d+$/.test(text) && pendingAssign[from + '_list']) {
+    const list = pendingAssign[from + '_list'];
+    const num = parseInt(text) - 1;
+    if (num >= 0 && num < list.length) {
+      const selected = list[num];
+      delete pendingAssign[from + '_list'];
+      pendingAssign[from] = { ref: selected.ref };
+      await sendWA(from,
+`📋 *Ticket Selected:* ${selected.ref}
+🐕 ${selected.data.incidentLabel}
+👤 ${selected.data.name}
+📱 +${selected.citizenPhone}
+📍 ${selected.data.location}
+🕐 ${selected.data.incidentTime}
+
+*Driver निवडा:*
+1️⃣  Somnath Catcher
+2️⃣  Mukesh Catcher
+
+_Reply *1* or *2*_`);
+      return;
+    }
+  }
+
   const refMatch = text.match(/^(VVCMC-STRAY-[A-Z]+-\d+|SDB-[A-Z0-9]+)$/i);
   if (refMatch) {
     const ref = refMatch[1].toUpperCase();
@@ -291,13 +316,34 @@ ${DRIVERS.map(d=>`${d.id}. ${d.name}  +${d.phone}`).join('\n')}`);
     return;
   }
 
-  let msg = `📋 *Admin Panel — VVCMC Bot*\n\n*Open Tickets:*\n━━━━━━━━━━\n`;
+  let msg = `📋 *Admin Panel — VVCMC Bot*
+
+*Open Tickets:*
+━━━━━━━━━━
+`;
   openTickets.forEach((t, i) => {
-    msg += `${i+1}. *${t.ref}*\n   🐕 ${t.data.incidentLabel}\n   👤 ${t.data.name}\n   📍 ${t.data.location.slice(0,40)}\n   🕐 ${t.data.incidentTime}\n\n`;
+    msg += `${i+1}. *${t.ref}*
+   🐕 ${t.data.incidentLabel}
+   👤 ${t.data.name}
+   📱 +${t.citizenPhone}
+   📍 ${t.data.location.slice(0,40)}
+   🕐 ${t.data.incidentTime}
+
+`;
   });
   msg += `━━━━━━━━━━
-👆 *वरील ticket ref copy करा आणि इथे paste करा!*
-Example: \`${openTickets[0]?.ref || 'VVCMC-STRAY-MAR-00010'}\``;
+`;
+  msg += `*Ticket assign करण्यासाठी:*
+`;
+  msg += `Ticket number reply करा (e.g. *1* or *2*)
+`;
+  msg += `किंवा ticket ref पाठवा (e.g. *${openTickets[0]?.ref}*)
+
+`;
+  msg += '*Drivers:*\n' + DRIVERS.map(d => `${d.id}. ${d.name}  +${d.phone}`).join('\n');
+
+  // Store open tickets for number selection
+  pendingAssign[from + '_list'] = openTickets;
   await sendWA(from, msg);
 }
 
