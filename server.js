@@ -197,7 +197,80 @@ async function handleAdmin(from, text) {
   }
 
   
-  if (/^[12]$/.test(text) && pendingAssign[from]) {
+  // STEP 2B - Admin selected schedule (1/2/3) after driver was selected
+  if (/^[123]$/.test(text) && pendingAssign[from]?.driverNum && pendingAssign[from]?.awaitingSchedule) {
+    const { ref, driverNum } = pendingAssign[from];
+    const ticket = tickets[ref];
+    if (!ticket) {
+      await sendWA(from, `⚠️ Ticket not found. Please send ticket ref again.`);
+      delete pendingAssign[from];
+      return;
+    }
+    const driver = DRIVERS.find(d => d.id === driverNum);
+    delete pendingAssign[from];
+
+    // Determine schedule
+    const schedules = {
+      '1': { label: 'आजच (Today)', labelEn: 'Today', time: 'आजच' },
+      '2': { label: 'उद्या सकाळी 9AM', labelEn: 'Tomorrow Morning 9AM', time: 'उद्या सकाळी 9AM' },
+      '3': { label: 'उद्या दुपारी 2PM', labelEn: 'Tomorrow Afternoon 2PM', time: 'उद्या दुपारी 2PM' },
+    };
+    const schedule = schedules[text];
+
+    ticket.status = 'Assigned';
+    ticket.driverName = driver.name;
+    ticket.visitSchedule = schedule.time;
+
+    // Notify driver with schedule
+    await sendWA(driver.phone,
+`📋 *तुम्हाला काम सोपवले गेले आहे!*
+🎫 Ref: ${ref}
+🐕 *तक्रार:* ${ticket.data.incidentLabel}
+👤 *तक्रारदार:* ${ticket.data.name}
+📍 *ठिकाण:* ${ticket.data.location}
+📞 *संपर्क:* +${ticket.citizenPhone}
+📞 *Alt:* ${ticket.data.altContact || 'N/A'}
+📅 *भेट:* ${schedule.label}
+
+_काम झाल्यावर *ticket* टाइप करा._`);
+
+    // Notify citizen with schedule
+    const citizenMsg = ticket.lang === 'mr'
+      ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*
+🎫 ${ref}
+👤 *अधिकारी:* ${driver.name}
+📅 *भेट:* ${schedule.label}
+
+_ते येण्यापूर्वी फोन करतील._`
+      : `👷 *Your complaint has been assigned!*
+🎫 ${ref}
+👤 *Officer:* ${driver.name}
+📅 *Visit:* ${schedule.labelEn}
+
+_He will call before arriving._`;
+    await sendWA(ticket.citizenPhone, citizenMsg);
+
+    // Update Airtable with driver + schedule
+    if (ticket.atRecordId) {
+      fetch(`${AT_URL}/${ticket.atRecordId}`, {
+        method: 'PATCH', headers: AT_HDR(),
+        body: JSON.stringify({ fields: {
+          fldgb6Ftq7qaRNoHe: 'Assigned',
+          fldQ85dcRt82zeQGJ: driver.name,
+          fldTA01ZKdnd1Xwwq: driver.phone,
+          fldu7xMdlxzNWvv3N: schedule.label,
+        }})
+      }).catch(() => {});
+    }
+
+    await sendWA(from, `✅ *${ref}* → *${driver.name}*
+📅 ${schedule.label}
+Citizen ✓  Driver ✓  Airtable ✓`);
+    return;
+  }
+
+  // STEP 2A - Admin selected driver (1 or 2) → now ask for schedule
+  if (/^[12]$/.test(text) && pendingAssign[from] && !pendingAssign[from]?.awaitingSchedule) {
     const { ref } = pendingAssign[from];
     const ticket = tickets[ref];
 
@@ -213,33 +286,19 @@ async function handleAdmin(from, text) {
       await sendWA(from, `⚠️ Invalid! Reply *1* for Somnath or *2* for Mukesh.`);
       return;
     }
-    delete pendingAssign[from];
 
-    ticket.status = 'Assigned';
-    ticket.driverName = driver.name;
+    // Store driver selection and wait for schedule
+    pendingAssign[from] = { ref, driverNum, awaitingSchedule: true };
 
-    
-    await sendWA(driver.phone,
-`📋 *तुम्हाला काम सोपवले गेले आहे!*
-🎫 Ref: ${ref}
-🐕 *तक्रार:* ${ticket.data.incidentLabel}
-👤 *तक्रारदार:* ${ticket.data.name}
-📍 *ठिकाण:* ${ticket.data.location}
-📞 *संपर्क:* +${ticket.citizenPhone}
-📞 *Alt:* ${ticket.data.altContact || 'N/A'}
+    await sendWA(from,
+`✅ *${driver.name}* selected for ${ref}
 
-_काम झाल्यावर *ticket* टाइप करा._`);
+📅 *भेट कधी करायची? / When to visit?*
+1️⃣  आजच (Today)
+2️⃣  उद्या सकाळी 9AM (Tomorrow morning)
+3️⃣  उद्या दुपारी 2PM (Tomorrow afternoon)
 
-    
-    const citizenMsg = ticket.lang === 'mr'
-      ? `👷 *तुमची तक्रार अधिकाऱ्याला दिली गेली!*\n🎫 ${ref}\n👤 *अधिकारी:* ${driver.name}\n\n_ते येण्यापूर्वी फोन करतील._`
-      : `👷 *Your complaint has been assigned!*\n🎫 ${ref}\n👤 *Officer:* ${driver.name}\n\n_He will call before arriving._`;
-    await sendWA(ticket.citizenPhone, citizenMsg);
-
-    
-    if (ticket.atRecordId) atAssign(ticket.atRecordId, driver.name, driver.phone).catch(() => {});
-
-    await sendWA(from, `✅ *${ref}* → *${driver.name}*\nCitizen ✓  Driver ✓  Airtable ✓`);
+_Reply 1, 2 or 3_`);
     return;
   }
 
