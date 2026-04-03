@@ -348,7 +348,9 @@ _Reply 1, 2 or 3_`);
 
   
   // Admin selects ticket by number from list (1, 2, 3...)
-  if (/^\d+$/.test(text) && pendingAssign[from + '_list']) {
+  const refMatch = text.match(/^(VVCMC-STRAY-[A-Z]+-\d+|SDB-[A-Z0-9]+)$/i);
+
+  if (!refMatch && /^\d+$/.test(text) && pendingAssign[from + '_list']) {
     const list = pendingAssign[from + '_list'];
     const num = parseInt(text) - 1;
     if (num >= 0 && num < list.length) {
@@ -372,7 +374,6 @@ _Reply *1* or *2*_`);
     }
   }
 
-  const refMatch = text.match(/^(VVCMC-STRAY-[A-Z]+-\d+|SDB-[A-Z0-9]+)$/i);
   if (refMatch) {
     const ref = refMatch[1].toUpperCase();
     let ticket = tickets[ref];
