@@ -127,12 +127,13 @@ async function loadTicketFromAirtable(ref) {
     const d = await r.json();
     if (d.records && d.records.length > 0) {
       const rec = d.records[0];
-      const f = rec.fields;
-      const status = f.fldgb6Ftq7qaRNoHe?.name || f.fldgb6Ftq7qaRNoHe;
+      // Airtable returns cellValuesByFieldId when using filterByFormula
+      const f = rec.cellValuesByFieldId || rec.fields || {};
+      const status = f.fldgb6Ftq7qaRNoHe?.name || f.fldgb6Ftq7qaRNoHe || 'Open';
       const ticket = {
         ref,
-        status: status || 'Open',
-        lang: f.fldQmRhTECXhx75EX === 'मराठी' ? 'mr' : 'en',
+        status: status,
+        lang: (f.fldQmRhTECXhx75EX === 'मराठी' || f.fldQmRhTECXhx75EX === 'Marathi') ? 'mr' : 'en',
         citizenPhone: f.fld9mitPsPU8y32PW || '',
         driverName: f.fldQ85dcRt82zeQGJ || '',
         atRecordId: rec.id,
@@ -147,9 +148,11 @@ async function loadTicketFromAirtable(ref) {
           incidentTime: nowIST(),
         }
       };
-      tickets[ref] = ticket; // cache in memory
-      console.log(`✅ Ticket ${ref} loaded from Airtable!`);
+      tickets[ref] = ticket;
+      console.log(`✅ Ticket ${ref} loaded: ${ticket.data.name} | ${ticket.data.location}`);
       return ticket;
+    } else {
+      console.log(`⚠️ Ticket ${ref} not found in Airtable`);
     }
   } catch(e) { console.error('[loadTicketFromAirtable error]', e.message); }
   return null;
@@ -856,3 +859,4 @@ require('http').createServer(async (req, res) => {
   res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'});
   res.end('VVCMC Stray Dog Bot is running! OK');
 }).listen(PORT, () => console.log(`✅ VVCMC Bot running on port ${PORT}`));
+
