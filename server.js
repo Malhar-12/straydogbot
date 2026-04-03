@@ -117,6 +117,44 @@ async function atClose(recordId, closingLocation, driverName, closingMediaUrl) {
 let ticketCounter = 13; 
 let counterReady = false; 
 
+async function loadTicketFromAirtable(ref) {
+  try {
+    const encoded = encodeURIComponent(`{Ref}="${ref}"`);
+    const r = await fetch(`${AT_URL}?filterByFormula=${encoded}`, {
+      headers: AT_HDR(),
+      signal: AbortSignal.timeout(8000)
+    });
+    const d = await r.json();
+    if (d.records && d.records.length > 0) {
+      const rec = d.records[0];
+      const f = rec.fields;
+      const status = f.fldgb6Ftq7qaRNoHe?.name || f.fldgb6Ftq7qaRNoHe;
+      const ticket = {
+        ref,
+        status: status || 'Open',
+        lang: f.fldQmRhTECXhx75EX === 'मराठी' ? 'mr' : 'en',
+        citizenPhone: f.fld9mitPsPU8y32PW || '',
+        driverName: f.fldQ85dcRt82zeQGJ || '',
+        atRecordId: rec.id,
+        data: {
+          incidentLabel: f.fldNfZJ9MB5Ub7o0S || '',
+          name: f.fld8dumoEH3eCv8bg || '',
+          phone: f.fld9mitPsPU8y32PW || '',
+          location: f.fldE45zv9IER93A8Q || '',
+          altContact: f.fldhrqYI58ioDB6xH || '',
+          mediaType: f.fld5idjsIpkMglZMV || '',
+          mediaUrl: f.flddMQC528gDuo0AI || '',
+          incidentTime: nowIST(),
+        }
+      };
+      tickets[ref] = ticket; // cache in memory
+      console.log(`✅ Ticket ${ref} loaded from Airtable!`);
+      return ticket;
+    }
+  } catch(e) { console.error('[loadTicketFromAirtable error]', e.message); }
+  return null;
+}
+
 async function saveCounter(val) {
   try {
     await fetch(`${ST_URL}/${COUNTER_RECORD_ID}`, {
@@ -200,7 +238,10 @@ async function handleAdmin(from, text) {
   // STEP 2B - Admin selected schedule (1/2/3) after driver was selected
   if (/^[123]$/.test(text) && pendingAssign[from]?.driverNum && pendingAssign[from]?.awaitingSchedule) {
     const { ref, driverNum } = pendingAssign[from];
-    const ticket = tickets[ref];
+    let ticket = tickets[ref];
+    if (!ticket) {
+      ticket = await loadTicketFromAirtable(ref);
+    }
     if (!ticket) {
       await sendWA(from, `⚠️ Ticket not found. Please send ticket ref again.`);
       delete pendingAssign[from];
@@ -275,7 +316,10 @@ Citizen ✓  Driver ✓  Airtable ✓`);
     const ticket = tickets[ref];
 
     if (!ticket) {
-      await sendWA(from, `⚠️ Ticket \`${ref}\` memory मध्ये सापडले नाही.\nकृपया ticket ref परत पाठवा.`);
+      ticket = await loadTicketFromAirtable(ref);
+    }
+    if (!ticket) {
+      await sendWA(from, `⚠️ Ticket \`${ref}\` सापडले नाही. कृपया ticket ref परत पाठवा.`);
       delete pendingAssign[from];
       return;
     }
@@ -331,12 +375,17 @@ _Reply *1* or *2*_`);
   const refMatch = text.match(/^(VVCMC-STRAY-[A-Z]+-\d+|SDB-[A-Z0-9]+)$/i);
   if (refMatch) {
     const ref = refMatch[1].toUpperCase();
-    const ticket = tickets[ref];
+    let ticket = tickets[ref];
+
+    // If not in memory, load from Airtable
+    if (!ticket) {
+      await sendWA(from, `🔍 Ticket ${ref} शोधत आहे... थांबा.`);
+      ticket = await loadTicketFromAirtable(ref);
+    }
 
     if (!ticket) {
-      await sendWA(from,
-`⚠️ Ticket \`${ref}\` सापडले नाही.
-Complainer ला पुन्हा *Hi* पाठवायला सांगा.`);
+      await sendWA(from, `⚠️ Ticket \`${ref}\` Airtable मध्ये सापडले नाही.
+कृपया ticket ref तपासा.`);
       return;
     }
 
