@@ -682,10 +682,11 @@ async function startup() {
       signal: AbortSignal.timeout(8000)
     });
     const d = await r.json();
-    const val = parseInt(d.fields?.fldThfAgPohMINbnH);
+    console.log('📊 Counter record:', JSON.stringify(d?.fields));
+    const val = parseInt(d.fields?.fldThfAgPohMINbnH || d.fields?.Value);
     if (val && val > 0) {
-      ticketCounter = val; 
-      counterReady = true; 
+      ticketCounter = val;
+      counterReady = true;
       console.log(`✅ Counter: ${ticketCounter}`);
     } else {
       console.log(`⚠️ Counter not found in Airtable, using default: ${ticketCounter}`);
@@ -699,6 +700,7 @@ async function startup() {
       signal: AbortSignal.timeout(10000)
     });
     const d = await r.json();
+    if (d.error) { console.log('⚠️ Airtable ticket load error:', JSON.stringify(d.error)); }
     if (d.records) {
       let loaded = 0;
       d.records.forEach(rec => {
