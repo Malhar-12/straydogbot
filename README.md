@@ -150,8 +150,8 @@ AIRTABLE_BASE_ID=your_airtable_base_id
 
 ## 👩‍💻 Developer
 
-**Khushi Urkude**
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/khushi-urkude-838629250/)
+**Malhar Kshirsagar**
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/malhar-kshirsagar-191264386)
 
 ---
 
