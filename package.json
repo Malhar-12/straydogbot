@@ -10,6 +10,6 @@
     "node": ">=18.0.0"
   },
   "keywords": ["whatsapp-bot", "chatbot", "nodejs", "civic-tech", "stray-dogs"],
-  "author": "Khushi Urkude",
+  "author": "Malhar Kshirsagar",
   "license": "MIT"
 }
